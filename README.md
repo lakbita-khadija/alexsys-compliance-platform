@@ -1,10 +1,6 @@
 # Phase 1 — Infrastructure Cloud Sécurisée (IaC)
 
 **Projet :** Plateforme Intelligente d'Audit de Conformité Cloud
-**Entreprise d'accueil :** AlexSys Solutions — Casablanca
-**Encadrant de stage :** M. Jihad MAAROUF
-**Encadrant académique :** Pr. Azougaghe Ali
-**Étudiante responsable (Étudiante A) :** Khadija LAKBITA — ENSA Marrakech, Génie Cyber-Défense (GCDSTE2)
 **Couche d'architecture :** Couche 1 — Infrastructure Cloud (IaC)
 **Référence cahier des charges :** Phase 1, Tâches 1.1 / 1.2 / 1.3 (Semaines 1-2)
 
