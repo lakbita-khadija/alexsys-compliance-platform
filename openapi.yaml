@@ -1,0 +1,400 @@
+openapi: 3.0.3
+info:
+  title: Copilot GRC Multi-Cloud API
+  version: "0.3.0"
+  description: >
+    Reflète schema.py v1.2.0. Les modèles internes (NormalizedResource) sont
+    volontairement absents ici — l'API n'expose que ce qu'un frontend ou
+    client externe consomme réellement.
+    Toute modification nécessite une conversation entre Student A et Student B,
+    jamais un edit solo.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /findings:
+    get:
+      summary: Liste des findings, filtrable par cloud, domaine, sévérité — paginée
+      operationId: listFindings
+      tags: [Student A — scoring/findings]
+      parameters:
+        - name: cloud_provider
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/CloudProvider" }
+        - name: domain
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Domain" }
+        - name: severity
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Severity" }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/FindingStatus" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Liste de findings (le total réel est renvoyé dans le header X-Total-Count)
+          headers:
+            X-Total-Count:
+              schema: { type: integer }
+              description: Nombre total de findings, sans pagination
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Finding" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /findings/{finding_id}:
+    get:
+      summary: Récupère un finding par son ID
+      operationId: getFinding
+      tags: [Student A — scoring/findings]
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Le finding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Finding" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /score:
+    get:
+      summary: Score de conformité agrégé
+      operationId: getComplianceScore
+      tags: [Student A — scoring]
+      responses:
+        "200":
+          description: Score global, par domaine et par cloud
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComplianceScore" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /findings/{finding_id}/enriched:
+    get:
+      summary: Explication IA + citation vérifiée d'un finding
+      operationId: explainFinding
+      tags: [Student B — copilot]
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Le finding enrichi
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrichedFinding" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /findings/{finding_id}/risk:
+    get:
+      summary: Estimation du risque financier d'un finding
+      operationId: getFinancialRisk
+      tags: [Student A — risk translator]
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Fourchette de risque financier estimée en MAD
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinancialRiskAssessment" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /findings/{finding_id}/prove-impact:
+    post:
+      summary: Lance le Red-Team Proof Engine sur ce finding (sandbox uniquement)
+      operationId: proveImpact
+      tags: [Student A — red-team proof engine]
+      description: >
+        Exécute une preuve d'exploitabilité non destructive. Refuse explicitement
+        toute ressource non taguée comme sandbox de test (voir proof_engine.py,
+        UnsafeTargetError).
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Résultat de la preuve d'exploitabilité
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExploitProof" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Ressource hors sandbox — exécution refusée par garde-fou (UnsafeTargetError)
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /findings/{finding_id}/remediation:
+    get:
+      summary: Récupère la proposition de remédiation générée pour ce finding
+      operationId: getRemediation
+      tags: [Student A — générateur de remédiation]
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Proposition de remédiation (jamais appliquée automatiquement)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemediationProposal" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      summary: Approuve ou rejette la remédiation proposée (validation humaine obligatoire)
+      operationId: reviewRemediation
+      tags: [Student B — validation dashboard/mobile]
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved: { type: boolean }
+                approved_by: { type: string }
+      responses:
+        "200":
+          description: Remédiation mise à jour (approval humain enregistré, aucune exécution automatique)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemediationProposal" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /copilot/ask:
+    post:
+      summary: Question libre au copilot (RAG)
+      operationId: askCopilot
+      tags: [Student B — copilot]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  example: "Sommes-nous conformes aux exigences de logging de la DNSSI ?"
+      responses:
+        "200":
+          description: Réponse sourcée du copilot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrichedFinding" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Auth RBAC portée par le middleware FastAPI de Student A (A3)
+
+  schemas:
+    CloudProvider:
+      type: string
+      enum: [aws, azure, gcp, terraform_plan]
+
+    Severity:
+      type: string
+      enum: [low, medium, high, critical]
+
+    Domain:
+      type: string
+      enum: [iam, network, encryption, logging, storage]
+
+    FindingStatus:
+      type: string
+      enum: [open, resolved, dismissed]
+
+    Finding:
+      type: object
+      required: [cloud_provider, resource_id, resource_type, rule_id, domain, severity, description, status, detected_at]
+      properties:
+        id: { type: string, format: uuid, nullable: true }
+        cloud_provider: { $ref: "#/components/schemas/CloudProvider" }
+        resource_id: { type: string }
+        resource_type: { type: string }
+        rule_id: { type: string }
+        domain: { $ref: "#/components/schemas/Domain" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        description: { type: string, maxLength: 2000 }
+        status: { $ref: "#/components/schemas/FindingStatus" }
+        detected_at: { type: string, format: date-time }
+        simulated: { type: boolean, default: false }
+        correlation_id: { type: string, nullable: true }
+
+    CorrelatedRisk:
+      type: object
+      required: [correlation_id, finding_ids, combined_severity, narrative]
+      properties:
+        correlation_id: { type: string }
+        finding_ids:
+          type: array
+          minItems: 2
+          items: { type: string, format: uuid }
+        combined_severity: { $ref: "#/components/schemas/Severity" }
+        narrative: { type: string, description: "Explication de la chaîne de risque (attack path)" }
+
+    RegulatoryCitation:
+      type: object
+      required: [framework, article_or_control, excerpt, source_document_id]
+      properties:
+        framework: { type: string, example: "ISO 27001" }
+        article_or_control: { type: string, example: "Annexe A.8.24" }
+        excerpt: { type: string, maxLength: 3000 }
+        source_document_id: { type: string }
+
+    EnrichedFinding:
+      type: object
+      required: [finding, explanation, citation_verified]
+      properties:
+        finding: { $ref: "#/components/schemas/Finding" }
+        explanation: { type: string, maxLength: 5000 }
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/RegulatoryCitation" }
+        citation_verified: { type: boolean }
+
+    FinancialRiskAssessment:
+      type: object
+      required: [estimated_min_mad, estimated_max_mad, rationale]
+      properties:
+        finding_id: { type: string, format: uuid, nullable: true }
+        correlation_id: { type: string, nullable: true }
+        estimated_min_mad: { type: number, minimum: 0 }
+        estimated_max_mad: { type: number, minimum: 0 }
+        rationale: { type: string, maxLength: 2000 }
+        citation:
+          allOf: [{ $ref: "#/components/schemas/RegulatoryCitation" }]
+          nullable: true
+
+    RemediationProposal:
+      type: object
+      required: [finding_id, terraform_snippet, justification, generated_at]
+      properties:
+        finding_id: { type: string, format: uuid }
+        terraform_snippet: { type: string, description: "Code Terraform proposé — jamais appliqué automatiquement" }
+        justification: { type: string }
+        justification_citation:
+          allOf: [{ $ref: "#/components/schemas/RegulatoryCitation" }]
+          nullable: true
+        approved: { type: boolean, default: false }
+        approved_by: { type: string, nullable: true }
+        generated_at: { type: string, format: date-time }
+
+    ExploitProof:
+      type: object
+      required: [finding_rule_id, resource_id, exploited, narrative, timestamp]
+      properties:
+        finding_rule_id: { type: string }
+        resource_id: { type: string }
+        exploited: { type: boolean }
+        narrative: { type: string }
+        evidence: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+
+    ComplianceScore:
+      type: object
+      required: [overall_score, total_findings, critical_findings, computed_at]
+      properties:
+        overall_score: { type: number, minimum: 0, maximum: 100 }
+        score_by_domain:
+          type: object
+          additionalProperties: { type: number }
+          example: { "iam": 78.0, "encryption": 65.0 }
+        score_by_cloud:
+          type: object
+          additionalProperties: { type: number }
+        total_findings: { type: integer, minimum: 0 }
+        critical_findings: { type: integer, minimum: 0 }
+        computed_at: { type: string, format: date-time }
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string, example: "Finding not found" }
+
+  responses:
+    Unauthorized:
+      description: Token manquant ou invalide
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+    ValidationError:
+      description: Corps de requête ou paramètres invalides
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: array
+                items: { type: object }
