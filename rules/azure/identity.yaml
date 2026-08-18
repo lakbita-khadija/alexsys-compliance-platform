@@ -1,0 +1,84 @@
+# Azure RBAC identity rules.
+#
+# Exactly ONE rule, and that is the design. STEP 8C's job was the
+# identity FOUNDATION — principals, assignments, role definitions,
+# scopes — and this rule exists to prove that foundation is consumable
+# end to end. It is not the seed of an Azure RBAC catalog; a real one
+# needs decisions about tiering, break-glass accounts and exemptions
+# that nobody has made yet, and inventing them to raise the rule count
+# is how a CSPM starts reporting opinions as compliance failures.
+#
+# framework_mappings stay `unresolved`: no maintainer has checked these
+# against published CIS Azure text, and `verified` requires provenance
+# (STEP 7).
+rules:
+  - id: azure-privileged-role-assigned-at-subscription-scope
+    applies_to_resource_type: azure_role_assignment
+    framework: iso_27001
+    control_id: A.8.2
+    domain: identity
+    severity: high
+    confidence: medium
+    service: authorization
+    version: "1.0.0"
+    title: "Privileged role assigned at subscription scope"
+    description: >-
+      A role assignment grants a role carrying the unrestricted
+      control-plane wildcard (`*`) across an entire subscription. Both
+      halves are required: an unrestricted role scoped to a single
+      resource group is narrower, and a scoped role at subscription
+      level is broad but bounded.
+      This describes GRANTED PERMISSION. It does not assert that the
+      principal has reached, or can reach, any particular resource —
+      RBAC is authorization evidence, not network reachability.
+    rationale: >-
+      Privilege is read from the role definition's own permissions, not
+      from its name. `role_name == "Owner"` would miss a custom role
+      with identical power and would fire on a harmless role someone
+      happened to name "Owner". `grants_all_actions` is computed from
+      the `actions` list Azure returned, and that list is preserved
+      alongside it so a reviewer can check our reading.
+    condition:
+      and:
+        # The scope half — derived by parsing the canonical scope id,
+        # never by matching on its text in YAML.
+        - field: is_subscription_scope
+          operator: is_true
+        # The privilege half — traverses to the role definition, which
+        # is the only resource that knows what the role can actually do.
+        - relationship: attached_to
+          direction: outgoing
+          target_type: azure_role_definition
+          where:
+            field: grants_all_actions
+            operator: is_true
+    evidence_template: >-
+      Role assignment {resource_id} grants a role with unrestricted
+      control-plane actions (*) at subscription scope. This states
+      granted permission, not confirmed access to any resource.
+    remediation:
+      summary: "Replace the subscription-wide privileged assignment with a narrower role and scope."
+      why_it_matters: >-
+        A principal with unrestricted actions across the subscription
+        can modify or delete anything in it, including the audit
+        settings that would record the change and the role assignments
+        that would revoke the access.
+      how_to_fix: >-
+        Assign the narrowest built-in role that covers the actual task,
+        at the narrowest scope that covers the actual resources —
+        usually a resource group rather than the subscription. Where
+        standing subscription-wide privilege is genuinely required, put
+        it behind time-bound activation rather than a permanent
+        assignment.
+      verification: >-
+        az role assignment list --subscription <id> --include-inherited
+        --query "[?scope=='/subscriptions/<id>']" and confirm no
+        remaining assignment references a role whose actions include '*'.
+    framework_mappings:
+      - framework: cis_azure
+        control: "1.23"
+        status: unresolved
+        rationale: >-
+          CIS Azure Foundations section 1 covers identity and access
+          management. Not verified against the published benchmark text.
+    tags: [azure, identity, rbac, privilege, relationship, composite]

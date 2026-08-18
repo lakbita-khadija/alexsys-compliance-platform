@@ -1,0 +1,56 @@
+{
+  "items": [
+    {
+      "id": "acme:111111111111:user-1:iam-user-no-mfa:2026-06-01T12:00:00+00:00",
+      "tenant_id": "acme",
+      "resource_id": "user-1",
+      "rule_id": "iam-user-no-mfa",
+      "framework": "iso_27001",
+      "control_id": "A.8.24",
+      "domain": "iam",
+      "status": "fail",
+      "severity": "high",
+      "evidence": {
+        "checked": true,
+        "resource": "user-1"
+      },
+      "detected_at": "2026-06-01T12:00:00Z"
+    },
+    {
+      "id": "acme:111111111111:trail-1:cloudtrail-enabled:2026-06-01T12:00:00+00:00",
+      "tenant_id": "acme",
+      "resource_id": "trail-1",
+      "rule_id": "cloudtrail-enabled",
+      "framework": "iso_27001",
+      "control_id": "A.8.24",
+      "domain": "logging",
+      "status": "pass",
+      "severity": "medium",
+      "evidence": {
+        "checked": true,
+        "resource": "trail-1"
+      },
+      "detected_at": "2026-06-01T12:00:00Z"
+    },
+    {
+      "id": "acme:111111111111:sg-1:sg-open-to-world:2026-06-01T12:00:00+00:00",
+      "tenant_id": "acme",
+      "resource_id": "sg-1",
+      "rule_id": "sg-open-to-world",
+      "framework": "iso_27001",
+      "control_id": "A.8.24",
+      "domain": "network",
+      "status": "fail",
+      "severity": "critical",
+      "evidence": {
+        "checked": true,
+        "resource": "sg-1"
+      },
+      "detected_at": "2026-06-01T12:00:00Z"
+    }
+  ],
+  "total": 6,
+  "limit": 3,
+  "offset": 0,
+  "has_more": true
+}

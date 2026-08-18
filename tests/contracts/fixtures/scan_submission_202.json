@@ -1,0 +1,6 @@
+{
+  "scan_key": "acme|aws|111111111111|-|2026-06-01T12:00:00+00:00",
+  "status": "queued",
+  "tenant_id": "acme",
+  "submitted_at": "2026-06-01T12:00:00Z"
+}

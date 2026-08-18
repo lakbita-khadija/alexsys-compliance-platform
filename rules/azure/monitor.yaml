@@ -1,0 +1,161 @@
+# Azure Activity Log (diagnostic settings) rules.
+#
+# The Azure counterpart of rules/aws/cloudtrail.yaml, including its
+# cross-resource checks: the last two rules use the ACCESSES graph
+# relationship (azure_activity_log_setting -> azure_storage_account) to
+# validate the security of the log DESTINATION, which no
+# single-resource rule can see.
+#
+# KNOWN LIMITATION (documented, not hidden): these rules evaluate
+# diagnostic settings that EXIST. A subscription with no Activity Log
+# export configured at all produces no resource of this type, and
+# therefore no finding — "absence of a resource" is not something a
+# per-resource rule engine can flag. See
+# docs/architecture/phase-3-azure.md.
+rules:
+  - id: azure-activity-log-no-destination
+    applies_to_resource_type: azure_activity_log_setting
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: critical
+    confidence: high
+    service: monitor
+    version: "1.0.0"
+    title: "Activity Log diagnostic setting has no destination configured"
+    description: "The setting exists but exports to no storage account, Log Analytics workspace, or Event Hub."
+    rationale: >
+      A diagnostic setting with no destination is the Azure analogue of
+      a CloudTrail trail that exists but is not logging: it gives a
+      false sense of audit coverage while retaining nothing beyond the
+      Activity Log's short default window.
+    condition:
+      field: has_any_destination
+      operator: equals
+      value: false
+    evidence_template: "Activity Log setting {name} exports to no destination at all."
+    tags: [monitor, logging]
+    remediation:
+      summary: "Configure a destination for the diagnostic setting."
+      why_it_matters: "Activity Log events are not being retained beyond the platform's short default window, leaving no long-term audit trail."
+      how_to_fix: "Add a storage account, Log Analytics workspace, or Event Hub destination to the setting."
+
+  - id: azure-activity-log-retention-too-short
+    applies_to_resource_type: azure_activity_log_setting
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: medium
+    confidence: medium
+    service: monitor
+    version: "1.0.0"
+    title: "Activity Log retention is shorter than 90 days"
+    description: "The longest retention configured across enabled log categories is below 90 days."
+    rationale: >
+      90 days is the widely-adopted minimum for incident investigation:
+      many breaches are not discovered for weeks. MEDIUM confidence
+      because retention may legitimately be enforced downstream instead
+      (e.g. by a Log Analytics workspace's own retention or a storage
+      lifecycle policy), which this rule cannot see.
+    condition:
+      field: retention_days
+      operator: less_than
+      value: 90
+    evidence_template: "Activity Log setting {name} retains logs for only {retention_days} days."
+    tags: [monitor, logging, retention]
+    framework_mappings:
+      - framework: cis_azure
+        control: "5.1.2"
+    remediation:
+      summary: "Raise the retention period to at least 90 days."
+      why_it_matters: "An incident discovered more than this many days after the fact would have no Activity Log evidence available."
+      how_to_fix: "Set the retention policy on each enabled log category to 90 days or more, or confirm the destination enforces equivalent retention."
+
+  - id: azure-activity-log-administrative-category-disabled
+    applies_to_resource_type: azure_activity_log_setting
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: high
+    confidence: high
+    service: monitor
+    version: "1.0.0"
+    title: "Activity Log setting does not export the Administrative category"
+    description: "The `Administrative` log category — every control-plane write operation in the subscription — is not among the enabled categories."
+    rationale: "Administrative events are the core audit record of who changed what in the subscription; a diagnostic setting that omits them captures very little of investigative value."
+    condition:
+      field: enabled_log_categories
+      operator: not_contains
+      value: Administrative
+    evidence_template: "Activity Log setting {name} does not export the Administrative category (enabled: {enabled_log_categories})."
+    tags: [monitor, logging]
+    remediation:
+      summary: "Enable the Administrative log category on the diagnostic setting."
+      why_it_matters: "Control-plane changes to this subscription are not being exported to long-term storage."
+      how_to_fix: "Add the `Administrative` category to the diagnostic setting's enabled logs."
+
+  - id: azure-activity-log-exports-to-publicly-exposed-storage
+    applies_to_resource_type: azure_activity_log_setting
+    framework: iso_27001
+    control_id: A.8.24
+    domain: logging
+    severity: critical
+    confidence: medium
+    service: monitor
+    version: "1.0.0"
+    title: "Activity Log exports to a publicly exposed storage account"
+    description: >
+      Cross-resource check using the ACCESSES graph relationship
+      (azure_activity_log_setting -> azure_storage_account): true if
+      the destination account allows anonymous blob public access or
+      has a default-allow firewall.
+    rationale: "Audit logs are themselves sensitive — they reveal subscription structure, resource names, and operational patterns useful for further attack. A publicly exposed log destination defeats the confidentiality of the entire audit trail."
+    condition:
+      relationship: accesses
+      direction: outgoing
+      target_type: azure_storage_account
+      where:
+        or:
+          - field: allow_blob_public_access
+            operator: equals
+            value: true
+          - field: network_default_action
+            operator: equals
+            value: Allow
+    evidence_template: "Activity Log setting {name} exports to a publicly exposed storage account."
+    tags: [monitor, logging, storage, exposure, relationship, composite]
+    remediation:
+      summary: "Remove public exposure from the destination storage account immediately."
+      why_it_matters: "This subscription's Activity Log is being written to a storage account reachable from the public internet."
+      how_to_fix: "Disable anonymous blob access and set the firewall default action to Deny on the destination account (see that account's own findings)."
+
+  - id: azure-activity-log-exports-to-storage-without-soft-delete
+    applies_to_resource_type: azure_activity_log_setting
+    framework: iso_27001
+    control_id: A.8.13
+    domain: logging
+    severity: high
+    confidence: medium
+    service: monitor
+    version: "1.0.0"
+    title: "Activity Log exports to a storage account without blob soft delete"
+    description: >
+      Cross-resource check using the ACCESSES graph relationship: true
+      if the destination storage account has blob soft delete disabled,
+      so exported log blobs can be deleted or overwritten
+      irrecoverably.
+    rationale: "Without soft delete on the destination, an attacker (or a mistake) can destroy the exported audit history, undermining the diagnostic setting's value regardless of its own configuration. The direct counterpart of `cloudtrail-logs-to-non-versioned-bucket`."
+    condition:
+      relationship: accesses
+      direction: outgoing
+      target_type: azure_storage_account
+      where:
+        field: blob_soft_delete_enabled
+        operator: equals
+        value: false
+    evidence_template: "Activity Log setting {name} exports to a storage account without blob soft delete enabled."
+    tags: [monitor, logging, storage, relationship, composite]
+    remediation:
+      summary: "Enable blob soft delete on the destination storage account."
+      why_it_matters: "Exported Activity Log blobs that are deleted or overwritten cannot currently be recovered."
+      how_to_fix: "Enable blob soft delete with an appropriate retention period on the destination account (see that account's own finding)."

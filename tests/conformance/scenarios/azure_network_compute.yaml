@@ -1,0 +1,348 @@
+# Azure NSG, Virtual Machine, Key Vault and Activity Log conformance
+# scenarios — including the cross-resource (relationship) cases, which
+# use the SAME graph machinery and the SAME `relationship` DSL node as
+# their AWS counterparts.
+scenarios:
+  - scenario_id: azure-nsg-restrictive
+    description: An NSG whose only inbound Allow rule comes from an internal prefix.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-safe"
+      resource_type: azure_network_security_group
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: nsg-safe
+        has_unrestricted_ingress: false
+        unrestricted_ingress_ports: []
+        security_rule_count: 1
+    expected_findings:
+      - rule_id: azure-nsg-ssh-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-rdp-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-sql-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-unrestricted-ingress-any-port
+        status: pass
+    tags: [azure, network, compliant]
+
+  - scenario_id: azure-nsg-rdp-open
+    description: >
+      RDP open to the internet. The RDP rule and the catch-all fire;
+      every other port rule must PASS.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-rdp"
+      resource_type: azure_network_security_group
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: nsg-rdp
+        has_unrestricted_ingress: true
+        unrestricted_ingress_ports: [3389]
+        security_rule_count: 1
+    expected_findings:
+      - rule_id: azure-nsg-rdp-open-to-internet
+        status: fail
+        severity: critical
+        evidence_contains: ["nsg-rdp", "port 3389"]
+      - rule_id: azure-nsg-ssh-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-sql-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-unrestricted-ingress-any-port
+        status: fail
+        severity: high
+    tags: [azure, network, exposure, non_compliant]
+
+  - scenario_id: azure-nsg-wide-port-range-open
+    description: >
+      EDGE CASE: an "any port" inbound rule from the internet sets the
+      flag but enumerates no single ports. Only the catch-all fires —
+      the same single-port-only limitation the AWS normalizer has.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-range"
+      resource_type: azure_network_security_group
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: nsg-range
+        has_unrestricted_ingress: true
+        unrestricted_ingress_ports: []
+        security_rule_count: 1
+    expected_findings:
+      - rule_id: azure-nsg-ssh-open-to-internet
+        status: pass
+      - rule_id: azure-nsg-unrestricted-ingress-any-port
+        status: fail
+    tags: [azure, network, edge_case]
+
+  - scenario_id: azure-vm-hardened
+    description: A VM with no public IP and a managed identity, attached to a restrictive NSG.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-hardened"
+      resource_type: azure_virtual_machine
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: vm-hardened
+        vm_size: Standard_B1s
+        public_ip_address: null
+        managed_disk_encryption_enabled: true
+        system_assigned_identity_enabled: true
+    relationships:
+      - type: attached_to
+        direction: outgoing
+        target:
+          resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-closed"
+          resource_type: azure_network_security_group
+          attributes:
+            name: nsg-closed
+            has_unrestricted_ingress: false
+            unrestricted_ingress_ports: []
+    expected_findings:
+      - rule_id: azure-vm-public-ip-assigned
+        status: pass
+      - rule_id: azure-vm-no-managed-identity
+        status: pass
+      - rule_id: azure-vm-attached-to-open-network-security-group
+        status: pass
+    tags: [azure, compute, relationship, compliant]
+
+  - scenario_id: azure-vm-exposed
+    description: A VM with a public IP, no managed identity, attached to a wide-open NSG.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-exposed"
+      resource_type: azure_virtual_machine
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: vm-exposed
+        vm_size: Standard_B1s
+        public_ip_address: "203.0.113.20"
+        managed_disk_encryption_enabled: null
+        system_assigned_identity_enabled: false
+    relationships:
+      - type: attached_to
+        direction: outgoing
+        target:
+          resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-open"
+          resource_type: azure_network_security_group
+          attributes:
+            name: nsg-open
+            has_unrestricted_ingress: true
+            unrestricted_ingress_ports: [22]
+    expected_findings:
+      - rule_id: azure-vm-public-ip-assigned
+        status: fail
+        severity: medium
+        evidence_contains: ["vm-exposed", "203.0.113.20"]
+      - rule_id: azure-vm-no-managed-identity
+        status: fail
+        severity: low
+      - rule_id: azure-vm-attached-to-open-network-security-group
+        status: fail
+        severity: high
+    tags: [azure, compute, network, relationship, non_compliant]
+
+  - scenario_id: azure-key-vault-compliant
+    description: A vault with soft delete, purge protection, RBAC, private access and a deny-by-default firewall.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv-good"
+      resource_type: azure_key_vault
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: kv-good
+        soft_delete_enabled: true
+        purge_protection_enabled: true
+        rbac_authorization_enabled: true
+        public_network_access_enabled: false
+        network_default_action: Deny
+    expected_findings:
+      - rule_id: azure-key-vault-soft-delete-disabled
+        status: pass
+      - rule_id: azure-key-vault-purge-protection-disabled
+        status: pass
+      - rule_id: azure-key-vault-rbac-authorization-disabled
+        status: pass
+      - rule_id: azure-key-vault-public-network-access-enabled
+        status: pass
+      - rule_id: azure-key-vault-network-default-allow
+        status: pass
+    tags: [azure, keyvault, compliant]
+
+  - scenario_id: azure-key-vault-unprotected
+    description: A vault with no soft delete, no purge protection, legacy access policies and public access.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv-bad"
+      resource_type: azure_key_vault
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: kv-bad
+        soft_delete_enabled: false
+        purge_protection_enabled: false
+        rbac_authorization_enabled: false
+        public_network_access_enabled: true
+        network_default_action: Allow
+    expected_findings:
+      - rule_id: azure-key-vault-soft-delete-disabled
+        status: fail
+        severity: high
+      - rule_id: azure-key-vault-purge-protection-disabled
+        status: fail
+        severity: medium
+      - rule_id: azure-key-vault-rbac-authorization-disabled
+        status: fail
+        severity: low
+      - rule_id: azure-key-vault-public-network-access-enabled
+        status: fail
+        severity: high
+      - rule_id: azure-key-vault-network-default-allow
+        status: fail
+        severity: medium
+    tags: [azure, keyvault, non_compliant]
+
+  - scenario_id: azure-key-vault-does-not-inherit-storage-rules
+    description: >
+      REGRESSION GUARD for the resource-type scoping bug this framework
+      itself found: a Key Vault carries `network_default_action`, the
+      same attribute name a storage account uses. Without
+      `applies_to_resource_type` on every rule, storage rules would fire
+      against this vault (and vice versa). Any such bleed reappears here
+      as an UNEXPECTED_FINDING.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv-scoping"
+      resource_type: azure_key_vault
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: kv-scoping
+        soft_delete_enabled: true
+        purge_protection_enabled: true
+        rbac_authorization_enabled: true
+        public_network_access_enabled: false
+        network_default_action: Allow
+    expected_findings:
+      - rule_id: azure-key-vault-network-default-allow
+        status: fail
+    tags: [azure, keyvault, regression_guard, scoping]
+
+  - scenario_id: azure-activity-log-compliant
+    description: An Activity Log setting exporting Administrative events to a private, soft-delete-protected storage account for a year.
+    resource:
+      resource_id: "/subscriptions/sub-1/providers/microsoft.insights/diagnosticSettings/audit-export"
+      resource_type: azure_activity_log_setting
+      tenant_id: conformance-test
+      account_id: "sub-1"
+      attributes:
+        name: audit-export
+        storage_account_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/auditlogs"
+        workspace_id: null
+        event_hub_authorization_rule_id: null
+        enabled_log_categories: ["Administrative", "Security"]
+        has_any_destination: true
+        retention_days: 365
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/auditlogs"
+          resource_type: azure_storage_account
+          attributes:
+            name: auditlogs
+            allow_blob_public_access: false
+            network_default_action: Deny
+            blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-activity-log-no-destination
+        status: pass
+      - rule_id: azure-activity-log-retention-too-short
+        status: pass
+      - rule_id: azure-activity-log-administrative-category-disabled
+        status: pass
+      - rule_id: azure-activity-log-exports-to-publicly-exposed-storage
+        status: pass
+      - rule_id: azure-activity-log-exports-to-storage-without-soft-delete
+        status: pass
+    tags: [azure, monitor, logging, relationship, compliant]
+
+  - scenario_id: azure-activity-log-exports-to-public-storage
+    description: >
+      CROSS-RESOURCE: the diagnostic setting itself is well configured,
+      but its destination storage account is publicly exposed and has no
+      soft delete. Only the two relationship rules fire.
+    resource:
+      resource_id: "/subscriptions/sub-1/providers/microsoft.insights/diagnosticSettings/leaky-export"
+      resource_type: azure_activity_log_setting
+      tenant_id: conformance-test
+      account_id: "sub-1"
+      attributes:
+        name: leaky-export
+        storage_account_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/leakylogs"
+        workspace_id: null
+        event_hub_authorization_rule_id: null
+        enabled_log_categories: ["Administrative"]
+        has_any_destination: true
+        retention_days: 365
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/leakylogs"
+          resource_type: azure_storage_account
+          attributes:
+            name: leakylogs
+            allow_blob_public_access: true
+            network_default_action: Allow
+            blob_soft_delete_enabled: false
+    expected_findings:
+      - rule_id: azure-activity-log-no-destination
+        status: pass
+      - rule_id: azure-activity-log-administrative-category-disabled
+        status: pass
+      - rule_id: azure-activity-log-exports-to-publicly-exposed-storage
+        status: fail
+        severity: critical
+      - rule_id: azure-activity-log-exports-to-storage-without-soft-delete
+        status: fail
+        severity: high
+    tags: [azure, monitor, logging, storage, exposure, relationship, non_compliant]
+
+  - scenario_id: azure-activity-log-no-destination
+    description: A diagnostic setting that exists but exports nowhere.
+    resource:
+      resource_id: "/subscriptions/sub-1/providers/microsoft.insights/diagnosticSettings/orphan-setting"
+      resource_type: azure_activity_log_setting
+      tenant_id: conformance-test
+      account_id: "sub-1"
+      attributes:
+        name: orphan-setting
+        storage_account_id: null
+        workspace_id: null
+        event_hub_authorization_rule_id: null
+        enabled_log_categories: []
+        has_any_destination: false
+        retention_days: null
+    expected_findings:
+      - rule_id: azure-activity-log-no-destination
+        status: fail
+        severity: critical
+      - rule_id: azure-activity-log-administrative-category-disabled
+        status: fail
+        severity: high
+      - rule_id: azure-activity-log-retention-too-short
+        status: indeterminate
+      - rule_id: azure-activity-log-exports-to-publicly-exposed-storage
+        status: pass
+      - rule_id: azure-activity-log-exports-to-storage-without-soft-delete
+        status: pass
+    tags: [azure, monitor, logging, three_valued_logic, non_compliant]

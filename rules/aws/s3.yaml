@@ -1,0 +1,284 @@
+# S3 bucket rules (Phase 3B senior catalog).
+#
+# Grounded in blueprint §15's Terraform module table ("bucket privé,
+# chiffré, versionné" vs "bucket public, non chiffré") and extended
+# with the bucket-policy and public-access-block facts collected in
+# Phase 3B (infrastructure/cloud/aws/resource_collectors/s3.py).
+#
+# Each condition describes the VIOLATION state: MATCHED -> the
+# condition held -> the rule engine's EvaluationResult maps to
+# FindingStatus.FAIL (application/rules/evaluate_rules.py).
+#
+# control_id/framework_mappings values are illustrative, standard
+# public references (CIS AWS Foundations Benchmark, NIST 800-53,
+# ISO 27001 Annex A) — not a certified/authoritative mapping. Only
+# mappings a maintainer has actually checked against the published
+# benchmark text are marked `status: verified`; everything else stays
+# `unresolved` (the Rule default) rather than being fabricated.
+rules:
+  - id: s3-bucket-public
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: critical
+    confidence: high
+    service: s3
+    version: "1.1.0"
+    title: "S3 bucket ACL grants access to the public"
+    description: >
+      The bucket's ACL grants read or write access to the well-known
+      AllUsers or AuthenticatedUsers groups, making its contents
+      readable by anyone on the internet (or anyone with an AWS
+      account, for AuthenticatedUsers).
+    rationale: >
+      Publicly readable/writable S3 buckets are one of the most common
+      causes of real-world cloud data breaches; ACL-based exposure is
+      also easy to introduce accidentally (e.g. a misapplied
+      `public-read` canned ACL).
+    condition:
+      field: public
+      operator: equals
+      value: true
+    evidence_template: "Bucket {resource_id} has an ACL grant to a public group (region {region})."
+    tags: [s3, exposure, data-protection]
+    references:
+      - "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html"
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.1.5"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+      - framework: nist_800_53
+        control: AC-3
+    remediation:
+      summary: "Remove the public ACL grant and enable S3 Block Public Access."
+      why_it_matters: "Anyone on the internet can currently read (or write) this bucket's contents."
+      how_to_fix: >
+        Remove the AllUsers/AuthenticatedUsers grant from the bucket
+        ACL, then enable S3 Block Public Access at the bucket or
+        account level so this can't silently reoccur.
+      automation_example: >
+        aws s3api put-public-access-block --bucket <bucket> \
+          --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+  - id: s3-bucket-not-encrypted
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: high
+    confidence: high
+    service: s3
+    version: "1.1.0"
+    title: "S3 bucket has no default server-side encryption"
+    description: "The bucket has no default server-side encryption configuration (SSE-S3 or SSE-KMS)."
+    rationale: "Data at rest should be encrypted by default so a single misconfiguration elsewhere doesn't leave objects in plaintext."
+    condition:
+      field: encrypted
+      operator: equals
+      value: false
+    evidence_template: "Bucket {resource_id} has no default server-side encryption configured."
+    tags: [s3, encryption]
+    references:
+      - "https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-encryption.html"
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.1.1"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Enable default server-side encryption on the bucket."
+      why_it_matters: "Without default encryption, objects can be uploaded in plaintext by any client that doesn't explicitly request encryption."
+      how_to_fix: "Configure a default bucket encryption rule (SSE-S3 or, preferably, SSE-KMS with a customer-managed key)."
+      automation_example: >
+        aws s3api put-bucket-encryption --bucket <bucket> \
+          --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"}}]}'
+
+  - id: s3-bucket-versioning-disabled
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.13
+    domain: storage
+    severity: medium
+    confidence: high
+    service: s3
+    version: "1.1.0"
+    title: "S3 bucket versioning is disabled"
+    description: "Object versioning is not enabled, so an overwrite or delete (including accidental or malicious) cannot be recovered."
+    rationale: "Versioning is the primary AWS-native control against accidental data loss and a precondition for effective ransomware/tamper recovery."
+    condition:
+      field: versioning_enabled
+      operator: equals
+      value: false
+    evidence_template: "Bucket {resource_id} does not have versioning enabled."
+    tags: [s3, data-protection, resilience]
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.1.3"
+    remediation:
+      summary: "Enable versioning on the bucket."
+      why_it_matters: "Without versioning, an overwritten or deleted object is unrecoverable through S3 itself."
+      how_to_fix: "Enable versioning on the bucket."
+      automation_example: "aws s3api put-bucket-versioning --bucket <bucket> --versioning-configuration Status=Enabled"
+
+  - id: s3-bucket-public-access-block-disabled
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: high
+    confidence: high
+    service: s3
+    version: "1.0.0"
+    title: "S3 Block Public Access is not fully enabled"
+    description: >
+      One or more of the four S3 Block Public Access settings
+      (BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy,
+      RestrictPublicBuckets) is not enabled for this bucket.
+    rationale: "Block Public Access is the account/bucket-level safety net that prevents public exposure even if an ACL or bucket policy is later misconfigured."
+    condition:
+      field: public_access_block_enabled
+      operator: equals
+      value: false
+    evidence_template: "Bucket {resource_id} does not have all four S3 Block Public Access settings enabled."
+    tags: [s3, exposure]
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.1.5"
+    remediation:
+      summary: "Enable all four S3 Block Public Access settings."
+      why_it_matters: "This is the last line of defense against a future ACL or bucket-policy misconfiguration making the bucket public."
+      how_to_fix: "Enable BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, and RestrictPublicBuckets."
+      automation_example: >
+        aws s3api put-public-access-block --bucket <bucket> \
+          --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+  - id: s3-bucket-logging-disabled
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.15
+    domain: storage
+    severity: low
+    confidence: high
+    service: s3
+    version: "1.0.0"
+    title: "S3 server access logging is disabled"
+    description: "The bucket does not have server access logging enabled, so requests against it (including unauthorized ones) are not recorded."
+    rationale: "Access logs are frequently the only forensic evidence available after a suspected data exposure — enabling them costs nothing to configure."
+    condition:
+      field: logging_enabled
+      operator: equals
+      value: false
+    evidence_template: "Bucket {resource_id} does not have server access logging enabled."
+    tags: [s3, logging]
+    remediation:
+      summary: "Enable server access logging on the bucket."
+      why_it_matters: "Without access logs, investigating a suspected unauthorized access to this bucket has no evidence trail."
+      how_to_fix: "Enable server access logging to a dedicated (non-public) logging bucket."
+      automation_example: "aws s3api put-bucket-logging --bucket <bucket> --bucket-logging-status file://logging.json"
+
+  - id: s3-bucket-policy-allows-public-access
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: critical
+    confidence: high
+    service: s3
+    version: "1.0.0"
+    title: "S3 bucket policy grants access to any principal"
+    description: >
+      The bucket policy contains an unconditional Allow statement with
+      principal "*" — the bucket-policy exposure path, distinct from
+      (and not covered by) the ACL-based `s3-bucket-public` rule.
+    rationale: "Bucket-policy-based public exposure is at least as common as ACL-based exposure and is not visible from the ACL alone."
+    condition:
+      field: bucket_policy_allows_public_access
+      operator: equals
+      value: true
+    evidence_template: "Bucket {resource_id} has a bucket policy statement granting access to any principal."
+    tags: [s3, exposure, iam]
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.1.5"
+    remediation:
+      summary: "Remove the wildcard-principal statement from the bucket policy."
+      why_it_matters: "Any AWS principal (or, without a Condition, potentially anyone) currently has the access this statement grants."
+      how_to_fix: "Scope the bucket policy's Principal to specific accounts/roles, or add a narrowing Condition (e.g. aws:SourceVpce, aws:PrincipalOrgID)."
+
+  - id: s3-bucket-publicly-exposed
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: critical
+    confidence: medium
+    service: s3
+    version: "1.0.0"
+    title: "S3 bucket is exposed through any known public-access path"
+    description: >
+      Composite check: true if the bucket is public via ACL, via bucket
+      policy, or lacks a full Block Public Access configuration. A
+      single "is this bucket exposed" signal for dashboards/reporting,
+      complementing (not replacing) the three narrower rules above,
+      which each identify a specific exposure mechanism.
+    rationale: "A reviewer triaging exposure risk often wants one composite signal before drilling into which specific control is missing."
+    condition:
+      or:
+        - field: public
+          operator: equals
+          value: true
+        - field: bucket_policy_allows_public_access
+          operator: equals
+          value: true
+        - field: public_access_block_enabled
+          operator: equals
+          value: false
+    evidence_template: "Bucket {resource_id} is exposed through at least one public-access path (ACL, bucket policy, or missing Block Public Access)."
+    tags: [s3, exposure, composite]
+    remediation:
+      summary: "Investigate which of the three exposure rules (ACL/policy/Block Public Access) triggered and fix it directly."
+      why_it_matters: "This composite finding exists to catch any of three distinct exposure mechanisms; the narrower rules identify exactly which one applies."
+      how_to_fix: "See the `s3-bucket-public`, `s3-bucket-policy-allows-public-access`, and `s3-bucket-public-access-block-disabled` findings for this same bucket."
+
+  - id: s3-bucket-encryption-and-versioning-both-disabled
+    applies_to_resource_type: s3_bucket
+    framework: iso_27001
+    control_id: A.8.13
+    domain: storage
+    severity: high
+    confidence: high
+    service: s3
+    version: "1.0.0"
+    title: "S3 bucket has neither encryption nor versioning"
+    description: >
+      Composite check: true only when both default encryption AND
+      versioning are disabled — a bucket with neither has no
+      AWS-native protection against unauthorized read (no encryption)
+      or destructive overwrite/delete (no versioning) at the same time.
+    rationale: "A bucket missing both controls simultaneously is a materially worse finding than either alone and is worth flagging as a compounded risk."
+    condition:
+      and:
+        - field: encrypted
+          operator: equals
+          value: false
+        - field: versioning_enabled
+          operator: equals
+          value: false
+    evidence_template: "Bucket {resource_id} has neither default encryption nor versioning enabled."
+    tags: [s3, encryption, data-protection, composite]
+    remediation:
+      summary: "Enable both default encryption and versioning on the bucket."
+      why_it_matters: "This bucket currently has no AWS-native protection against unauthorized read or destructive overwrite/delete."
+      how_to_fix: "Enable default server-side encryption and versioning (see the two individual rules for this bucket for exact commands)."

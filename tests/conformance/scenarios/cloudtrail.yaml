@@ -1,0 +1,187 @@
+# CloudTrail conformance scenarios (Phase 3B, Part L).
+#
+# The last three scenarios exercise the ACCESSES cross-resource path
+# (cloudtrail -> s3_bucket): a trail's own settings can be perfect
+# while its log destination bucket is unversioned or public.
+scenarios:
+  - scenario_id: cloudtrail-fully-compliant
+    description: >
+      A multi-region trail with validation on, actively logging, KMS
+      encrypted, delivering to a versioned private bucket. Every
+      CloudTrail rule PASSes.
+    resource:
+      resource_id: "arn:aws:cloudtrail:us-east-1:123456789012:trail/conformance-good"
+      resource_type: cloudtrail
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        name: conformance-good
+        is_multi_region_trail: true
+        log_file_validation_enabled: true
+        is_logging: true
+        s3_bucket_name: conformance-trail-logs
+        kms_key_id: "arn:aws:kms:us-east-1:123456789012:key/abc"
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: conformance-trail-logs
+          resource_type: s3_bucket
+          attributes:
+            versioning_enabled: true
+            public: false
+            bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: cloudtrail-not-multi-region
+        status: pass
+      - rule_id: cloudtrail-log-validation-disabled
+        status: pass
+      - rule_id: cloudtrail-logging-disabled
+        status: pass
+      - rule_id: cloudtrail-not-encrypted-with-kms
+        status: pass
+      - rule_id: cloudtrail-logs-to-non-versioned-bucket
+        status: pass
+      - rule_id: cloudtrail-logs-to-public-bucket
+        status: pass
+    tags: [cloudtrail, compliant]
+
+  - scenario_id: cloudtrail-single-region-not-logging
+    description: >
+      A trail that is configured but inert: single-region, validation
+      off, not actually logging, and unencrypted.
+    resource:
+      resource_id: "arn:aws:cloudtrail:us-east-1:123456789012:trail/conformance-bad"
+      resource_type: cloudtrail
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        name: conformance-bad
+        is_multi_region_trail: false
+        log_file_validation_enabled: false
+        is_logging: false
+        s3_bucket_name: conformance-trail-logs
+        kms_key_id: null
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: conformance-trail-logs
+          resource_type: s3_bucket
+          attributes:
+            versioning_enabled: true
+            public: false
+            bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: cloudtrail-not-multi-region
+        status: fail
+        severity: medium
+      - rule_id: cloudtrail-log-validation-disabled
+        status: fail
+        severity: medium
+      - rule_id: cloudtrail-logging-disabled
+        status: fail
+        severity: critical
+      - rule_id: cloudtrail-not-encrypted-with-kms
+        status: fail
+        severity: low
+    tags: [cloudtrail, non_compliant]
+
+  - scenario_id: cloudtrail-logs-to-unversioned-bucket
+    description: >
+      CROSS-RESOURCE: the trail itself is perfectly configured, but
+      its destination bucket has no versioning. Only the relationship
+      rule fires — no single-resource CloudTrail rule can see this.
+    resource:
+      resource_id: "arn:aws:cloudtrail:us-east-1:123456789012:trail/conformance-unversioned-dest"
+      resource_type: cloudtrail
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        name: conformance-unversioned-dest
+        is_multi_region_trail: true
+        log_file_validation_enabled: true
+        is_logging: true
+        s3_bucket_name: conformance-unversioned-logs
+        kms_key_id: "arn:aws:kms:us-east-1:123456789012:key/abc"
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: conformance-unversioned-logs
+          resource_type: s3_bucket
+          attributes:
+            versioning_enabled: false
+            public: false
+            bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: cloudtrail-not-multi-region
+        status: pass
+      - rule_id: cloudtrail-logging-disabled
+        status: pass
+      - rule_id: cloudtrail-logs-to-non-versioned-bucket
+        status: fail
+        severity: high
+      - rule_id: cloudtrail-logs-to-public-bucket
+        status: pass
+    tags: [cloudtrail, s3, relationship, non_compliant]
+
+  - scenario_id: cloudtrail-logs-to-public-bucket
+    description: >
+      CROSS-RESOURCE, worst case: a well-configured trail delivering
+      audit logs into a publicly readable bucket.
+    resource:
+      resource_id: "arn:aws:cloudtrail:us-east-1:123456789012:trail/conformance-public-dest"
+      resource_type: cloudtrail
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        name: conformance-public-dest
+        is_multi_region_trail: true
+        log_file_validation_enabled: true
+        is_logging: true
+        s3_bucket_name: conformance-public-logs
+        kms_key_id: "arn:aws:kms:us-east-1:123456789012:key/abc"
+    relationships:
+      - type: accesses
+        direction: outgoing
+        target:
+          resource_id: conformance-public-logs
+          resource_type: s3_bucket
+          attributes:
+            versioning_enabled: true
+            public: true
+            bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: cloudtrail-logs-to-public-bucket
+        status: fail
+        severity: critical
+      - rule_id: cloudtrail-logs-to-non-versioned-bucket
+        status: pass
+    tags: [cloudtrail, s3, exposure, relationship, non_compliant]
+
+  - scenario_id: cloudtrail-with-no-destination-bucket-edge-case
+    description: >
+      EDGE CASE for the relationship rules: a trail with no
+      S3BucketName emits no ACCESSES edge, so the graph has no
+      neighbor to inspect. Existence-quantification over zero
+      neighbors is NOT_MATCHED -> PASS. The relationship rules must
+      not error, and must not invent a violation from absent data.
+    resource:
+      resource_id: "arn:aws:cloudtrail:us-east-1:123456789012:trail/conformance-no-bucket"
+      resource_type: cloudtrail
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        name: conformance-no-bucket
+        is_multi_region_trail: true
+        log_file_validation_enabled: true
+        is_logging: true
+        s3_bucket_name: null
+        kms_key_id: "arn:aws:kms:us-east-1:123456789012:key/abc"
+    expected_findings:
+      - rule_id: cloudtrail-logs-to-non-versioned-bucket
+        status: pass
+      - rule_id: cloudtrail-logs-to-public-bucket
+        status: pass
+    tags: [cloudtrail, relationship, edge_case]

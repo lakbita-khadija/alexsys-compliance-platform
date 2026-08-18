@@ -1,0 +1,140 @@
+# KMS conformance scenarios (Phase 3B, Part L).
+#
+# The AWS-managed-key scenario is the canonical example of this
+# codebase's "absent vs collected-null" distinction — see
+# rules/aws/kms.yaml's header comment for the full reasoning.
+scenarios:
+  - scenario_id: kms-compliant-key
+    description: >
+      A customer-managed key with rotation on, an enabled state, and a
+      scoped key policy. Every KMS rule PASSes.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-good"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        key_state: Enabled
+        key_manager: CUSTOMER
+        rotation_enabled: true
+        key_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: kms-key-rotation-disabled
+        status: pass
+      - rule_id: kms-key-policy-allows-public-access
+        status: pass
+      - rule_id: kms-key-pending-deletion
+        status: pass
+      - rule_id: kms-key-not-customer-managed
+        status: pass
+    tags: [kms, compliant]
+
+  - scenario_id: kms-rotation-disabled-key
+    description: A customer-managed key with automatic rotation turned off.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-no-rotation"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        key_state: Enabled
+        key_manager: CUSTOMER
+        rotation_enabled: false
+        key_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: kms-key-rotation-disabled
+        status: fail
+        severity: medium
+      - rule_id: kms-key-not-customer-managed
+        status: pass
+    tags: [kms, non_compliant]
+
+  - scenario_id: kms-aws-managed-key
+    description: >
+      EDGE CASE — the "absent vs collected-null" distinction. An
+      AWS-managed key has `rotation_enabled: null` (the setting does
+      not apply, and was deliberately not queried), NOT false. The
+      rotation rule compares `null == false` -> not equal -> PASS,
+      which is the correct real-world outcome: AWS rotates these keys
+      automatically regardless. The informational
+      `kms-key-not-customer-managed` rule is the one that fires.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-aws-managed"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        key_state: Enabled
+        key_manager: AWS
+        rotation_enabled: null
+        key_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: kms-key-rotation-disabled
+        status: pass
+      - rule_id: kms-key-not-customer-managed
+        status: fail
+        severity: low
+    tags: [kms, edge_case, three_valued_logic]
+
+  - scenario_id: kms-public-key-policy
+    description: A key whose policy grants access to any principal.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-public-policy"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        key_state: Enabled
+        key_manager: CUSTOMER
+        rotation_enabled: true
+        key_policy_allows_public_access: true
+    expected_findings:
+      - rule_id: kms-key-policy-allows-public-access
+        status: fail
+        severity: critical
+      - rule_id: kms-key-rotation-disabled
+        status: pass
+    tags: [kms, exposure, non_compliant]
+
+  - scenario_id: kms-key-pending-deletion
+    description: A key scheduled for deletion — an impending irreversible data-loss event.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-deleting"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        key_state: PendingDeletion
+        key_manager: CUSTOMER
+        rotation_enabled: true
+        key_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: kms-key-pending-deletion
+        status: fail
+        severity: high
+      - rule_id: kms-key-rotation-disabled
+        status: pass
+    tags: [kms, availability, non_compliant]
+
+  - scenario_id: kms-key-with-uncollected-state
+    description: >
+      THREE-VALUED LOGIC: a key whose state and manager were never
+      collected (attributes absent entirely). Those rules must be
+      INDETERMINATE — never silently PASS.
+    resource:
+      resource_id: "arn:aws:kms:us-east-1:123456789012:key/conformance-partial"
+      resource_type: kms_key
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        rotation_enabled: true
+    expected_findings:
+      - rule_id: kms-key-rotation-disabled
+        status: pass
+      - rule_id: kms-key-pending-deletion
+        status: indeterminate
+      - rule_id: kms-key-not-customer-managed
+        status: indeterminate
+      - rule_id: kms-key-policy-allows-public-access
+        status: indeterminate
+    tags: [kms, three_valued_logic, edge_case]

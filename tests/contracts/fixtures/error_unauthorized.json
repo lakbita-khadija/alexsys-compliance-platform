@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "authentication_error",
+    "message": "authentication required",
+    "correlation_id": "6969eaf7-3604-4788-b39c-cddc67f0caac",
+    "details": {}
+  }
+}

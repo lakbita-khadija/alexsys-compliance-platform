@@ -1,0 +1,205 @@
+# S3 conformance scenarios (Phase 3B design proposal, Part L).
+#
+# Each scenario declares a synthetic resource shape and exactly what
+# rules/aws/s3.yaml should conclude about it. These are EXPECTATIONS
+# written by a human, compared against what the real Rule Engine
+# actually produces — never re-derived by the comparator itself (see
+# application/conformance/comparator.py).
+#
+# Note on `expected_findings` scope: a scenario only needs to declare
+# the rules it is *about*. Any other rule that FAILs against the same
+# resource surfaces as UNEXPECTED_FINDING, which is the point — it
+# catches rule interactions nobody predicted. Rules that merely PASS or
+# return INDETERMINATE against the resource are not reported unless
+# explicitly expected.
+scenarios:
+  - scenario_id: s3-fully-compliant-bucket
+    description: >
+      A bucket that is private, encrypted, versioned, logged, with
+      Block Public Access fully on and no bucket policy. Every S3 rule
+      should PASS.
+    resource:
+      resource_id: conformance-compliant-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: false
+        encrypted: true
+        versioning_enabled: true
+        logging_enabled: true
+        public_access_block_enabled: true
+        has_bucket_policy: false
+        bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: s3-bucket-public
+        status: pass
+      - rule_id: s3-bucket-not-encrypted
+        status: pass
+      - rule_id: s3-bucket-versioning-disabled
+        status: pass
+      - rule_id: s3-bucket-public-access-block-disabled
+        status: pass
+      - rule_id: s3-bucket-logging-disabled
+        status: pass
+      - rule_id: s3-bucket-policy-allows-public-access
+        status: pass
+      - rule_id: s3-bucket-publicly-exposed
+        status: pass
+      - rule_id: s3-bucket-encryption-and-versioning-both-disabled
+        status: pass
+    tags: [s3, compliant]
+
+  - scenario_id: s3-acl-public-bucket
+    description: >
+      A bucket made public through its ACL (not its policy). The
+      ACL rule and the composite exposure rule fail; the
+      bucket-policy rule must NOT fire — the two exposure mechanisms
+      are deliberately distinct rules.
+    resource:
+      resource_id: conformance-acl-public-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: true
+        encrypted: true
+        versioning_enabled: true
+        logging_enabled: true
+        public_access_block_enabled: false
+        has_bucket_policy: false
+        bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: s3-bucket-public
+        status: fail
+        severity: critical
+        evidence_contains: ["conformance-acl-public-bucket", "public group"]
+      - rule_id: s3-bucket-policy-allows-public-access
+        status: pass
+      - rule_id: s3-bucket-public-access-block-disabled
+        status: fail
+        severity: high
+      - rule_id: s3-bucket-publicly-exposed
+        status: fail
+    tags: [s3, exposure, non_compliant]
+
+  - scenario_id: s3-policy-public-bucket
+    description: >
+      A bucket made public through its bucket POLICY while its ACL is
+      private. The mirror image of the previous scenario — proves the
+      two exposure rules are genuinely independent, not two names for
+      the same check.
+    resource:
+      resource_id: conformance-policy-public-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: false
+        encrypted: true
+        versioning_enabled: true
+        logging_enabled: true
+        public_access_block_enabled: false
+        has_bucket_policy: true
+        bucket_policy_allows_public_access: true
+    expected_findings:
+      - rule_id: s3-bucket-public
+        status: pass
+      - rule_id: s3-bucket-policy-allows-public-access
+        status: fail
+        severity: critical
+      - rule_id: s3-bucket-publicly-exposed
+        status: fail
+      # Block Public Policy must be off for a public bucket policy to
+      # take effect at all, so this rule necessarily fails alongside it
+      # — a real rule interaction, first surfaced by this framework's
+      # own UNEXPECTED_FINDING classification rather than by hand.
+      - rule_id: s3-bucket-public-access-block-disabled
+        status: fail
+    tags: [s3, exposure, non_compliant]
+
+  - scenario_id: s3-unencrypted-unversioned-bucket
+    description: >
+      A private bucket with neither encryption nor versioning — the
+      compounded-risk composite rule must fire in addition to the two
+      individual rules.
+    resource:
+      resource_id: conformance-bare-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: false
+        encrypted: false
+        versioning_enabled: false
+        logging_enabled: true
+        public_access_block_enabled: true
+        has_bucket_policy: false
+        bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: s3-bucket-not-encrypted
+        status: fail
+        severity: high
+      - rule_id: s3-bucket-versioning-disabled
+        status: fail
+        severity: medium
+      - rule_id: s3-bucket-encryption-and-versioning-both-disabled
+        status: fail
+        severity: high
+      - rule_id: s3-bucket-publicly-exposed
+        status: pass
+    tags: [s3, encryption, non_compliant]
+
+  - scenario_id: s3-encrypted-but-unversioned-bucket
+    description: >
+      EDGE CASE for the composite rule: only ONE of the two conditions
+      holds, so `s3-bucket-encryption-and-versioning-both-disabled`
+      must PASS even though `s3-bucket-versioning-disabled` FAILs. This
+      is what distinguishes an `and` composite from an `or` one.
+    resource:
+      resource_id: conformance-half-protected-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: false
+        encrypted: true
+        versioning_enabled: false
+        logging_enabled: true
+        public_access_block_enabled: true
+        has_bucket_policy: false
+        bucket_policy_allows_public_access: false
+    expected_findings:
+      - rule_id: s3-bucket-not-encrypted
+        status: pass
+      - rule_id: s3-bucket-versioning-disabled
+        status: fail
+      - rule_id: s3-bucket-encryption-and-versioning-both-disabled
+        status: pass
+    tags: [s3, edge_case]
+
+  - scenario_id: s3-bucket-with-uncollected-attributes
+    description: >
+      THREE-VALUED LOGIC EDGE CASE: a bucket whose encryption and
+      versioning state was never collected (the attributes are absent
+      entirely, not false). Those rules must be INDETERMINATE — never
+      silently PASS, which would report the bucket as compliant on
+      evidence that does not exist.
+    resource:
+      resource_id: conformance-partial-bucket
+      resource_type: s3_bucket
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        public: false
+        public_access_block_enabled: true
+    expected_findings:
+      - rule_id: s3-bucket-public
+        status: pass
+      - rule_id: s3-bucket-not-encrypted
+        status: indeterminate
+      - rule_id: s3-bucket-versioning-disabled
+        status: indeterminate
+      - rule_id: s3-bucket-encryption-and-versioning-both-disabled
+        status: indeterminate
+    tags: [s3, three_valued_logic, edge_case]

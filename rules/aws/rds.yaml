@@ -1,0 +1,188 @@
+# AWS RDS rules.
+#
+# These consume the STEP 8B collector, whose 15 security-relevant fields
+# were all dead on arrival.
+#
+# The most important rule here is `rds-reachable-from-internet`, and it
+# is the reason this file is short: one cross-resource rule that joins
+# the database's endpoint configuration to its actual firewall is worth
+# more than five rules restating individual fields.
+#
+# Note what is deliberately ABSENT: no rule on deletion_protection,
+# multi_az, iam_database_authentication_enabled or
+# auto_minor_version_upgrade. Each is collected, and each would need a
+# product policy defining the expected state before a finding could
+# claim anything. Inventing that policy to raise the rule count is how a
+# CSPM starts reporting opinions as compliance failures.
+rules:
+  - id: rds-storage-not-encrypted
+    applies_to_resource_type: rds_db_instance
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: high
+    version: "1.0.0"
+    title: "RDS instance storage is not encrypted"
+    description: >-
+      Encryption at rest is off for this database. Unlike most RDS
+      settings this one cannot be changed in place — it is fixed at
+      creation — so the remediation is a snapshot-and-restore, which is
+      why finding it early matters.
+    condition:
+      field: storage_encrypted
+      operator: is_false
+    evidence_template: >-
+      RDS instance {resource_id} has storage encryption disabled.
+    remediation:
+      summary: "Recreate the instance with storage encryption enabled."
+      why_it_matters: >-
+        Unencrypted storage means the underlying volumes and every
+        automated snapshot are readable by anyone who obtains them,
+        without touching the database itself.
+      how_to_fix: >-
+        Snapshot the instance, copy the snapshot with --kms-key-id, and
+        restore from the encrypted copy. Encryption cannot be enabled on
+        an existing instance.
+      verification: >-
+        aws rds describe-db-instances --db-instance-identifier <id>
+        --query 'DBInstances[0].StorageEncrypted' returns true.
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.3.1"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 2.3 covers RDS. Not verified
+          against the published benchmark text.
+    tags: [rds, encryption, data-protection]
+
+  - id: rds-public-endpoint-configured
+    applies_to_resource_type: rds_db_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    version: "1.0.0"
+    title: "RDS instance is configured with a public endpoint"
+    description: >-
+      `PubliclyAccessible` is set, so the instance has a
+      publicly-resolvable address. This is a CONFIGURATION finding, not a
+      reachability one — the security group still gates every packet, and
+      a correctly firewalled public-endpoint database is not exposed.
+      `rds-reachable-from-internet` is the rule that asserts reachability,
+      and it requires the firewall evidence too.
+    condition:
+      field: publicly_accessible
+      operator: is_true
+    evidence_template: >-
+      RDS instance {resource_id} has a public endpoint configured. This
+      describes addressability, not confirmed reachability.
+    remediation:
+      summary: "Disable public accessibility unless the endpoint is genuinely required."
+      why_it_matters: >-
+        A public endpoint removes the network boundary as a defence and
+        leaves the security group as the only control. One overly broad
+        rule then exposes the database directly.
+      how_to_fix: >-
+        aws rds modify-db-instance --db-instance-identifier <id>
+        --no-publicly-accessible --apply-immediately
+      verification: >-
+        aws rds describe-db-instances --db-instance-identifier <id>
+        --query 'DBInstances[0].PubliclyAccessible' returns false.
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.3.3"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 2.3 covers RDS. Not verified
+          against the published benchmark text.
+    tags: [rds, network, configuration]
+
+  - id: rds-reachable-from-internet
+    applies_to_resource_type: rds_db_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: critical
+    version: "1.0.0"
+    title: "RDS instance is reachable from the internet"
+    description: >-
+      BOTH halves are present: a public endpoint AND an attached security
+      group that admits unrestricted ingress. This is the rule that
+      asserts reachability, and it is the reason
+      `rds-public-endpoint-configured` deliberately does not.
+      A database in this state is directly connectable from anywhere.
+    condition:
+      and:
+        - field: publicly_accessible
+          operator: is_true
+        - relationship: attached_to
+          direction: outgoing
+          target_type: security_group
+          where:
+            field: has_unrestricted_ingress
+            operator: is_true
+    evidence_template: >-
+      RDS instance {resource_id} has a public endpoint AND is attached to
+      at least one security group with unrestricted internet ingress.
+    remediation:
+      summary: "Close the security group, then disable public accessibility."
+      why_it_matters: >-
+        Both controls have failed at once, so the database is directly
+        connectable from the internet. Credential strength is the only
+        remaining barrier.
+      how_to_fix: >-
+        Restrict the security group's ingress to known source ranges
+        first — that is the immediate containment — then run
+        aws rds modify-db-instance --no-publicly-accessible.
+      verification: >-
+        Confirm no attached security group permits 0.0.0.0/0 on the
+        database port, and that PubliclyAccessible is false.
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.3.3"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 2.3 covers RDS. Not verified
+          against the published benchmark text.
+    tags: [rds, network, exposure, relationship, composite]
+
+  - id: rds-automated-backups-disabled
+    applies_to_resource_type: rds_db_instance
+    framework: iso_27001
+    control_id: A.8.13
+    domain: resilience
+    severity: medium
+    version: "1.0.0"
+    title: "RDS automated backups are disabled"
+    description: >-
+      `BackupRetentionPeriod` is 0, which is AWS's own encoding for
+      "automated backups off". This is a real threshold rather than an
+      invented one — any value above 0 means backups are running, so the
+      rule needs no product policy to define an expected number of days.
+    condition:
+      field: backup_retention_period
+      operator: equals
+      value: 0
+    evidence_template: >-
+      RDS instance {resource_id} has automated backups disabled
+      (retention period 0).
+    remediation:
+      summary: "Set a non-zero backup retention period."
+      why_it_matters: >-
+        With backups off there is no point-in-time recovery. Ransomware,
+        a bad migration or an accidental DROP become unrecoverable rather
+        than inconvenient.
+      how_to_fix: >-
+        aws rds modify-db-instance --db-instance-identifier <id>
+        --backup-retention-period 7 --apply-immediately
+      verification: >-
+        aws rds describe-db-instances --db-instance-identifier <id>
+        --query 'DBInstances[0].BackupRetentionPeriod' returns > 0.
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.3.2"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 2.3 covers RDS. Not verified
+          against the published benchmark text.
+    tags: [rds, backup, resilience]

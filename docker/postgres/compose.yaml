@@ -1,0 +1,75 @@
+# Local PostgreSQL for ComplianceIQ development and testing (Phase 4).
+#
+# This is a DEVELOPMENT convenience, not a production deployment. It
+# exists so that `pytest tests/integration/persistence/` runs for real
+# instead of skipping — the persistence tests exercise JSONB, ON CONFLICT,
+# CHECK constraints and transactional rollback, none of which another
+# engine reproduces faithfully, so there is no meaningful fallback.
+#
+#   docker compose -f docker/postgres/compose.yaml up -d
+#   alembic upgrade head
+#   pytest tests/integration/persistence/
+#
+# The password below is a throwaway for a container bound to localhost.
+# It is safe to commit only because it grants access to nothing but an
+# empty local database. Production credentials come from the environment
+# or a secret manager and never appear in a file in this repository —
+# see docs/architecture/phase-4-persistence.md, "Configuration and
+# secrets".
+
+name: complianceiq-dev
+
+services:
+  postgres:
+    # Pinned to a minor version, not `:16` or `:latest`. A CSPM platform
+    # that cannot reproduce the database it tested against has a gap in
+    # its own audit trail.
+    image: postgres:16.13-alpine
+    container_name: complianceiq-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: complianceiq
+      POSTGRES_PASSWORD: complianceiq-local-dev
+      POSTGRES_DB: complianceiq
+      # Deterministic collation: index ordering and comparison behaviour
+      # otherwise depend on the host's locale, which is a genuinely
+      # miserable class of "works on my machine" bug.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+
+    ports:
+      # Bound to loopback explicitly. The bare `5432:5432` form listens on
+      # every interface, which on a laptop with a permissive firewall
+      # means an unauthenticated database on the local network.
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the throwaway databases the test suites use, so a fresh
+      # checkout can run the integration tests without manual setup.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      # `pg_isready` alone returns success while the server is still in
+      # its initdb phase and refusing connections, so an actual query is
+      # used instead.
+      test: ["CMD-SHELL", "psql -U complianceiq -d complianceiq -c 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    command:
+      # Verbose enough to debug a slow query locally; far too verbose for
+      # production, which is another reason this file is dev-only.
+      - "postgres"
+      - "-c"
+      - "log_statement=none"
+      - "-c"
+      - "log_min_duration_statement=500"
+      - "-c"
+      - "max_connections=50"
+
+volumes:
+  postgres-data:
+    driver: local

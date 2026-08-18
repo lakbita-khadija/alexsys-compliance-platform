@@ -1,0 +1,92 @@
+[project]
+name = "complianceiq"
+version = "0.1.0"
+description = "ComplianceIQ — cloud compliance scanning platform"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.34",
+    "PyYAML>=6.0",
+    # Azure collectors (infrastructure/cloud/azure/). Kept alongside
+    # boto3 rather than behind an extra: a multi-cloud CSPM engine
+    # supports both providers by default, and `AzureCollector` is
+    # selected at runtime by CloudProvider, not at install time.
+    "azure-identity>=1.15",
+    "azure-mgmt-storage>=21.0",
+    "azure-mgmt-network>=25.0",
+    "azure-mgmt-compute>=30.0",
+    "azure-mgmt-keyvault>=10.0",
+    "azure-mgmt-monitor>=6.0",
+    "azure-mgmt-resource>=23.0",
+    # STEP 8C — Azure RBAC (role assignments + role definitions). An ARM
+    # management-plane package like the others above, using the same
+    # `DefaultAzureCredential` and the same permission model; it is NOT
+    # Microsoft Graph and introduces no second authentication path.
+    # Added because `Microsoft.Authorization` is otherwise unreachable.
+    "azure-mgmt-authorization>=4.0",
+
+    # Phase 4 — PostgreSQL persistence. These were imported by
+    # infrastructure/persistence/ and exercised by 47 tests while being
+    # declared nowhere, so a clean `pip install .` produced a package
+    # that could not import its own persistence layer. Declared here as
+    # a defect fix, independent of Phase 5.
+    "SQLAlchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+
+    # Phase 5 — Core Platform & Data Service (HTTP + auth).
+    "fastapi>=0.110",
+    "pydantic>=2.6",
+    "PyJWT>=2.8",
+    # Supplies the RSA/EC primitives PyJWT needs for RS256/ES256. Named
+    # explicitly rather than relying on PyJWT's `[crypto]` extra so the
+    # asymmetric-signing requirement is visible in the dependency list
+    # — it is a security-relevant choice, not an optional add-on.
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+# The ASGI server is an optional extra, not a hard dependency: the
+# library and its tests never need it (FastAPI's TestClient drives the
+# app in-process), and only an actual deployment does.
+serve = [
+    "uvicorn[standard]>=0.27",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.26",  # required by fastapi.testclient
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "aws_integration: requires real AWS credentials and a deployed terraform/aws test environment (see tests/integration/aws/conftest.py); skipped by default.",
+    "azure_integration: requires real Azure credentials and a deployed terraform/azure test environment (see tests/integration/azure/conftest.py); skipped by default.",
+]
+
+[tool.mypy]
+python_version = "3.11"
+
+# The AWS and Azure SDKs ship no type information (no py.typed marker,
+# no bundled stubs), so mypy can say nothing useful about them. This
+# silences ONLY the "this third-party library is untyped" notice for
+# those specific modules — it does not relax any check on our own code,
+# which type-checks clean with zero ignores.
+#
+# Typed stubs exist as separate packages (boto3-stubs, and per-service
+# azure stubs) and could be added later; they are heavy and were not
+# worth pulling in for this phase.
+[[tool.mypy.overrides]]
+module = [
+    "boto3.*",
+    "botocore.*",
+    "azure.*",
+]
+ignore_missing_imports = true
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["domain*", "contracts*", "application*", "infrastructure*", "presentation*"]

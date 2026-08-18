@@ -1,0 +1,190 @@
+# CloudTrail rules (Phase 3B senior catalog).
+#
+# Grounded in blueprint §15: "multi-région, validation activée"
+# (compliant) vs "mono-région" (non-compliant). The last two rules use
+# the ACCESSES graph relationship (cloudtrail -> s3_bucket, wired by
+# infrastructure/cloud/aws/normalizers/cloudtrail.py whenever a trail
+# has an S3BucketName) to validate the security of the trail's own log
+# destination — a genuinely cross-resource question a single-resource
+# rule cannot answer.
+rules:
+  - id: cloudtrail-not-multi-region
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: medium
+    confidence: high
+    service: cloudtrail
+    version: "1.1.0"
+    title: "CloudTrail trail is not multi-region"
+    description: "IsMultiRegionTrail is false — activity in regions other than the trail's home region is not captured."
+    rationale: "An attacker (or a misconfigured deployment) operating in a region this trail doesn't cover leaves no CloudTrail record at all."
+    condition:
+      field: is_multi_region_trail
+      operator: equals
+      value: false
+    evidence_template: "CloudTrail trail {resource_id} is single-region only."
+    tags: [cloudtrail, logging]
+    framework_mappings:
+      - framework: cis_aws
+        control: "3.1"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Convert the trail to multi-region."
+      why_it_matters: "Activity in any AWS region this trail doesn't cover is currently invisible to CloudTrail-based monitoring and investigation."
+      how_to_fix: "Update the trail to enable IsMultiRegionTrail."
+      automation_example: "aws cloudtrail update-trail --name <trail> --is-multi-region-trail"
+
+  - id: cloudtrail-log-validation-disabled
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: medium
+    confidence: high
+    service: cloudtrail
+    version: "1.1.0"
+    title: "CloudTrail log file validation is disabled"
+    description: "LogFileValidationEnabled is false — delivered log files have no cryptographic integrity guarantee."
+    rationale: "Without validation, a party with write access to the log bucket could tamper with or delete log files without detection."
+    condition:
+      field: log_file_validation_enabled
+      operator: equals
+      value: false
+    evidence_template: "CloudTrail trail {resource_id} does not have log file validation enabled."
+    tags: [cloudtrail, logging, integrity]
+    framework_mappings:
+      - framework: cis_aws
+        control: "3.2"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Enable log file validation on the trail."
+      why_it_matters: "Delivered log files currently have no tamper-evidence; a compromised principal with bucket write access could alter the historical record undetected."
+      how_to_fix: "Enable log file validation on the trail."
+      automation_example: "aws cloudtrail update-trail --name <trail> --enable-log-file-validation"
+
+  - id: cloudtrail-logging-disabled
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.15
+    domain: logging
+    severity: critical
+    confidence: high
+    service: cloudtrail
+    version: "1.1.0"
+    title: "CloudTrail trail exists but is not actively logging"
+    description: "GetTrailStatus reports IsLogging=false — the trail is configured but not currently recording events."
+    rationale: "A trail that exists but isn't logging gives a false sense of coverage while producing zero actual audit records — worse than having no trail at all, because it isn't obviously missing."
+    condition:
+      field: is_logging
+      operator: equals
+      value: false
+    evidence_template: "CloudTrail trail {resource_id} is configured but is not currently logging."
+    tags: [cloudtrail, logging]
+    remediation:
+      summary: "Start logging on the trail."
+      why_it_matters: "No account activity is currently being recorded by this trail, despite it existing and appearing configured."
+      how_to_fix: "Start logging on the trail."
+      automation_example: "aws cloudtrail start-logging --name <trail>"
+
+  - id: cloudtrail-not-encrypted-with-kms
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: low
+    confidence: high
+    service: cloudtrail
+    version: "1.0.0"
+    title: "CloudTrail trail does not use KMS encryption for log files"
+    description: "No KmsKeyId is configured — delivered log files rely on Amazon S3-managed encryption (SSE-S3) rather than a customer-managed KMS key."
+    rationale: "SSE-KMS adds key-level access control and an audit trail of who decrypted log files, which SSE-S3 alone does not provide."
+    condition:
+      field: kms_key_id
+      operator: is_null
+    evidence_template: "CloudTrail trail {resource_id} does not use a KMS key to encrypt delivered log files."
+    tags: [cloudtrail, encryption]
+    remediation:
+      summary: "Configure the trail to use SSE-KMS with a customer-managed key."
+      why_it_matters: "Anyone with S3 read access to the log bucket can currently read log file contents without any additional KMS-level access control or audit trail."
+      how_to_fix: "Create (or reuse) a customer-managed KMS key with a policy scoped to CloudTrail and this account, and configure the trail to use it."
+      automation_example: "aws cloudtrail update-trail --name <trail> --kms-key-id <key-arn>"
+
+  - id: cloudtrail-logs-to-non-versioned-bucket
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.13
+    domain: logging
+    severity: high
+    confidence: medium
+    service: cloudtrail
+    version: "1.0.0"
+    title: "CloudTrail delivers logs to an S3 bucket without versioning enabled"
+    description: >
+      Cross-resource check using the ACCESSES graph relationship
+      (cloudtrail -> s3_bucket, from S3BucketName): true if the trail's
+      target bucket does not have versioning enabled.
+    rationale: "Without versioning on the log bucket, an overwritten or deleted log object is unrecoverable — undermining the trail's value as tamper-evident audit history regardless of the trail's own settings."
+    condition:
+      relationship: accesses
+      direction: outgoing
+      target_type: s3_bucket
+      where:
+        field: versioning_enabled
+        operator: equals
+        value: false
+    evidence_template: "CloudTrail trail {resource_id} delivers logs to bucket {s3_bucket_name}, which does not have versioning enabled."
+    tags: [cloudtrail, logging, s3, relationship, composite]
+    remediation:
+      summary: "Enable versioning on the trail's target S3 bucket."
+      why_it_matters: "A log object in this bucket that is overwritten or deleted (accidentally or maliciously) cannot currently be recovered."
+      how_to_fix: "Enable versioning on the target bucket (see the s3-bucket-versioning-disabled finding for that bucket)."
+
+  - id: cloudtrail-logs-to-public-bucket
+    applies_to_resource_type: cloudtrail
+    framework: iso_27001
+    control_id: A.8.24
+    domain: logging
+    severity: critical
+    confidence: medium
+    service: cloudtrail
+    version: "1.0.0"
+    title: "CloudTrail delivers logs to a publicly exposed S3 bucket"
+    description: >
+      Cross-resource check using the ACCESSES graph relationship
+      (cloudtrail -> s3_bucket): true if the trail's target bucket is
+      public via ACL or bucket policy. Account activity logs — often
+      containing sensitive operational detail — would be readable by
+      anyone on the internet.
+    rationale: "Audit logs are themselves sensitive data (they can reveal account structure, resource names, and operational patterns useful for further attack); a public log bucket defeats the confidentiality of the entire audit trail."
+    condition:
+      relationship: accesses
+      direction: outgoing
+      target_type: s3_bucket
+      where:
+        or:
+          - field: public
+            operator: equals
+            value: true
+          - field: bucket_policy_allows_public_access
+            operator: equals
+            value: true
+    evidence_template: "CloudTrail trail {resource_id} delivers logs to bucket {s3_bucket_name}, which is publicly exposed."
+    tags: [cloudtrail, logging, s3, exposure, relationship, composite]
+    remediation:
+      summary: "Remove public access from the trail's target S3 bucket immediately."
+      why_it_matters: "This account's CloudTrail activity logs are currently readable by anyone on the internet."
+      how_to_fix: "Remove the public ACL grant and/or bucket policy statement on the target bucket (see the s3-bucket-public and s3-bucket-policy-allows-public-access findings for that bucket)."

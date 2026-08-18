@@ -1,0 +1,90 @@
+# Azure Virtual Machine rules.
+#
+# The last rule is the Azure counterpart of
+# `ec2-instance-attached-to-open-security-group`, and it uses the SAME
+# `relationship` DSL node against the SAME ATTACHED_TO relationship
+# type — the clearest demonstration that the cross-resource machinery
+# built for AWS required no Azure-specific extension.
+rules:
+  - id: azure-vm-public-ip-assigned
+    applies_to_resource_type: azure_virtual_machine
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    confidence: high
+    service: compute
+    version: "1.0.0"
+    title: "Virtual machine has a public IP address"
+    description: "The VM has a public IP associated with one of its network interfaces."
+    rationale: "A public IP puts the VM directly on the internet; combined with a permissive NSG this is a direct exposure path, and this rule flags the precondition."
+    condition:
+      field: public_ip_address
+      operator: is_not_null
+    evidence_template: "Virtual machine {name} has public IP {public_ip_address} assigned."
+    tags: [compute, exposure, network]
+    remediation:
+      summary: "Remove the public IP unless internet-facing access is genuinely required."
+      why_it_matters: "This VM is directly reachable from the internet at its public IP, subject only to its NSG rules."
+      how_to_fix: "Place the VM in a private subnet behind a load balancer, NAT gateway, or Azure Bastion instead of assigning a public IP."
+
+  - id: azure-vm-no-managed-identity
+    applies_to_resource_type: azure_virtual_machine
+    framework: iso_27001
+    control_id: A.5.15
+    domain: iam
+    severity: low
+    confidence: medium
+    service: compute
+    version: "1.0.0"
+    title: "Virtual machine has no system-assigned managed identity"
+    description: "No system-assigned managed identity is enabled on the VM."
+    rationale: >
+      Without a managed identity, workloads on this VM cannot obtain
+      short-lived, automatically-rotated tokens and typically fall back
+      to long-lived secrets stored on disk or in configuration — a
+      materially worse credential-management posture. The direct
+      counterpart of `ec2-instance-no-iam-instance-profile`.
+    condition:
+      field: system_assigned_identity_enabled
+      operator: equals
+      value: false
+    evidence_template: "Virtual machine {name} has no system-assigned managed identity."
+    tags: [compute, iam, credentials]
+    remediation:
+      summary: "Enable a system-assigned managed identity scoped to what this VM's workload actually needs."
+      why_it_matters: "Any Azure API access from this VM likely relies on long-lived static secrets instead of automatically-rotated tokens."
+      how_to_fix: "Enable a system-assigned managed identity and grant it least-privilege RBAC roles."
+      automation_example: "az vm identity assign --name <vm> --resource-group <rg>"
+
+  - id: azure-vm-attached-to-open-network-security-group
+    applies_to_resource_type: azure_virtual_machine
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: medium
+    service: compute
+    version: "1.0.0"
+    title: "Virtual machine is attached to a network security group with unrestricted internet ingress"
+    description: >
+      Cross-resource check using the ATTACHED_TO graph relationship
+      (azure_virtual_machine -> azure_network_security_group, resolved
+      by the collector through the VM's NICs and their subnets): true
+      if any attached NSG has at least one inbound Allow rule from a
+      wildcard/Internet source.
+    rationale: "The VM-level view of exposure — a hardened-looking VM can still be directly reachable from the internet if any one of its effective NSGs is permissive."
+    condition:
+      relationship: attached_to
+      direction: outgoing
+      target_type: azure_network_security_group
+      where:
+        field: has_unrestricted_ingress
+        operator: equals
+        value: true
+    evidence_template: "Virtual machine {name} is attached to at least one network security group with unrestricted internet ingress."
+    tags: [compute, network, exposure, relationship, composite]
+    remediation:
+      summary: "Fix the unrestricted inbound rule on the attached network security group."
+      why_it_matters: "This VM is reachable from the internet through at least one of its effective network security groups."
+      how_to_fix: "Locate the referenced NSG's own finding (azure-nsg-ssh-open-to-internet and similar) and restrict its inbound rule."

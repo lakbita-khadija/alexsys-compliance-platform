@@ -1,0 +1,298 @@
+# IAM rules (Phase 3B senior catalog).
+#
+# Two resource types are targeted here:
+#   - `iam_user`            (per-user checks: MFA, keys, attached policies)
+#   - `iam_account_summary` (account-wide checks: root MFA, password policy —
+#     one resource per scanned account; see
+#     infrastructure/cloud/aws/resource_collectors/iam.py:IamAccountCollector)
+#
+# Grounded in blueprint §15 ("MFA actif" vs "MFA absent") and extended
+# with the managed-policy and account-summary facts collected in
+# Phase 3B.
+rules:
+  # --- iam_user ---------------------------------------------------------
+
+  - id: iam-user-mfa-disabled
+    applies_to_resource_type: iam_user
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: high
+    confidence: high
+    service: iam
+    version: "1.1.0"
+    title: "IAM user does not have MFA enabled"
+    description: "The IAM user has no MFA device registered."
+    rationale: "A password-only credential is the single most common initial-access vector in cloud account compromise."
+    condition:
+      field: mfa_active
+      operator: equals
+      value: false
+    evidence_template: "IAM user {resource_id} has no MFA device registered."
+    tags: [iam, mfa, identity]
+    framework_mappings:
+      - framework: cis_aws
+        control: "1.10"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Require the user to register an MFA device."
+      why_it_matters: "Without MFA, a leaked password alone is sufficient to compromise this identity."
+      how_to_fix: "Have the user register a virtual or hardware MFA device, and consider an IAM policy that denies API access without MFA present."
+
+  - id: iam-user-full-admin-policy-attached
+    applies_to_resource_type: iam_user
+    framework: iso_27001
+    control_id: A.5.15
+    domain: iam
+    severity: high
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "IAM user has a full-administrator managed policy attached"
+    description: >
+      At least one managed policy attached directly to this user grants
+      Action "*" over Resource "*" (the literal AdministratorAccess
+      shape — see infrastructure/cloud/aws/policy_analysis.py).
+    rationale: "Least privilege: a full-admin policy attached to an individual user (rather than assumed through a role) is broader access than almost any job function requires, and it cannot be time-boxed the way role assumption can."
+    condition:
+      field: has_full_admin_policy
+      operator: equals
+      value: true
+    evidence_template: "IAM user {resource_id} has a managed policy attached that grants Action:* over Resource:* (attached policies: {attached_policy_names})."
+    tags: [iam, least-privilege, identity]
+    framework_mappings:
+      - framework: cis_aws
+        control: "1.16"
+    remediation:
+      summary: "Replace the full-admin policy with a scoped policy, or move to role assumption."
+      why_it_matters: "This user has unrestricted access to every AWS service and resource in the account directly on their long-lived credentials."
+      how_to_fix: "Detach the administrator policy and grant only the specific permissions this user's job function requires; prefer assumable roles with session limits over direct user policies for any admin-level access."
+
+  - id: iam-user-multiple-active-access-keys
+    applies_to_resource_type: iam_user
+    framework: iso_27001
+    control_id: A.8.5
+    domain: iam
+    severity: medium
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "IAM user has more than one active access key"
+    description: "The user has more than one Active access key at the same time."
+    rationale: "AWS's own key-rotation guidance assumes at most one active key per user at a time (the second slot is meant for overlap during rotation, not steady-state use) — multiple simultaneously-active keys widen the credential-leak blast radius."
+    condition:
+      field: active_access_key_count
+      operator: greater_than
+      value: 1
+    evidence_template: "IAM user {resource_id} has {active_access_key_count} simultaneously active access keys."
+    tags: [iam, credentials]
+    remediation:
+      summary: "Deactivate all but one active access key per user."
+      why_it_matters: "Each active key is an independent, equally-privileged credential that can leak; more active keys means more ways for this identity to be compromised."
+      how_to_fix: "Rotate to a single active key: create the new key, update the consuming application, then deactivate (and later delete) the old one."
+
+  - id: iam-user-access-key-without-mfa
+    applies_to_resource_type: iam_user
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: critical
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "IAM user has an active programmatic credential and no MFA"
+    description: >
+      Composite check: the user has at least one active access key
+      (programmatic, long-lived credential) AND has no MFA device
+      registered — the combination that matters most, since the access
+      key itself cannot be MFA-challenged at use time the way console
+      login can.
+    rationale: "An access key with no compensating MFA on the identity that owns it is the highest-risk IAM credential shape this catalog can detect from collected data."
+    condition:
+      and:
+        - field: active_access_key_count
+          operator: greater_than
+          value: 0
+        - field: mfa_active
+          operator: equals
+          value: false
+    evidence_template: "IAM user {resource_id} has {active_access_key_count} active access key(s) and no MFA device registered."
+    tags: [iam, mfa, credentials, composite]
+    remediation:
+      summary: "Register MFA for this user and review whether the access key is still required."
+      why_it_matters: "If this access key leaks, there is no MFA challenge anywhere in the credential's usage path to stop it being used."
+      how_to_fix: "Register an MFA device for the user; if the access key is used by an application rather than a human, migrate that application to an assumable role instead of a long-lived user key."
+
+  # --- iam_account_summary (one resource per scanned account) ----------
+
+  - id: iam-root-account-mfa-disabled
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: critical
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "AWS account root user does not have MFA enabled"
+    description: "The account's root user (the one identity that can never be permission-restricted) has no MFA device registered."
+    rationale: "The root user bypasses every IAM policy in the account; MFA is the only meaningful compensating control available for it."
+    condition:
+      field: root_mfa_enabled
+      operator: equals
+      value: false
+    evidence_template: "AWS account root user has no MFA device registered."
+    tags: [iam, mfa, root, account]
+    framework_mappings:
+      - framework: cis_aws
+        control: "1.5"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Register a hardware MFA device for the root user."
+      why_it_matters: "A compromised root credential with no MFA gives an attacker complete, unrestrictable control of the AWS account."
+      how_to_fix: "Sign in as root and register a hardware (not virtual) MFA device; stop using root for day-to-day operations entirely."
+
+  - id: iam-account-password-policy-missing
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: high
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "AWS account has no IAM password policy configured"
+    description: "GetAccountPasswordPolicy returned NoSuchEntity — the account is using AWS's permissive default password requirements."
+    rationale: "Without an explicit policy, IAM console users can set very weak passwords, and there is no organization-wide minimum standard enforced."
+    condition:
+      field: has_password_policy
+      operator: equals
+      value: false
+    evidence_template: "AWS account has no custom IAM password policy configured."
+    tags: [iam, password-policy, account]
+    framework_mappings:
+      - framework: cis_aws
+        control: "1.8"
+    remediation:
+      summary: "Configure an account password policy."
+      why_it_matters: "Every IAM user with console access can currently choose an arbitrarily weak password."
+      how_to_fix: "Set a password policy requiring at least 14 characters, symbols, numbers, and a reasonable max age."
+      automation_example: >
+        aws iam update-account-password-policy --minimum-password-length 14 \
+          --require-symbols --require-numbers --max-password-age 90 --password-reuse-prevention 24
+
+  - id: iam-account-password-policy-too-short
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: medium
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "AWS account password policy allows short passwords"
+    description: "The configured minimum password length is below 14 characters (the CIS AWS Foundations Benchmark baseline)."
+    rationale: "Minimum length is the single strongest lever against offline password-guessing, and 14 characters is the widely-adopted current baseline."
+    condition:
+      field: password_policy_min_length
+      operator: less_than
+      value: 14
+    evidence_template: "AWS account password policy allows passwords as short as {password_policy_min_length} characters."
+    tags: [iam, password-policy, account]
+    framework_mappings:
+      - framework: cis_aws
+        control: "1.8"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Raise the minimum password length to at least 14 characters."
+      why_it_matters: "Short minimum lengths make console-user passwords meaningfully easier to brute-force offline if a password hash is ever exposed."
+      how_to_fix: "Update the account password policy's MinimumPasswordLength to 14 or higher."
+      automation_example: "aws iam update-account-password-policy --minimum-password-length 14"
+
+  - id: iam-account-password-policy-no-symbols-required
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: low
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "AWS account password policy does not require symbols"
+    description: "RequireSymbols is not enabled on the account password policy."
+    rationale: "Symbol requirements add entropy per character, complementing (not substituting for) minimum length."
+    condition:
+      field: password_policy_requires_symbols
+      operator: is_false
+    evidence_template: "AWS account password policy does not require at least one symbol character."
+    tags: [iam, password-policy, account]
+    remediation:
+      summary: "Require at least one symbol character in account passwords."
+      why_it_matters: "This is one of several composability requirements that together resist offline guessing; missing it alone is a minor gap."
+      how_to_fix: "Update the account password policy to set RequireSymbols=true."
+      automation_example: "aws iam update-account-password-policy --require-symbols"
+
+  - id: iam-account-password-policy-no-numbers-required
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: low
+    confidence: high
+    service: iam
+    version: "1.0.0"
+    title: "AWS account password policy does not require numbers"
+    description: "RequireNumbers is not enabled on the account password policy."
+    rationale: "Numeric-character requirements add entropy per character, complementing minimum length."
+    condition:
+      field: password_policy_requires_numbers
+      operator: is_false
+    evidence_template: "AWS account password policy does not require at least one numeric character."
+    tags: [iam, password-policy, account]
+    remediation:
+      summary: "Require at least one numeric character in account passwords."
+      why_it_matters: "This is one of several composability requirements that together resist offline guessing; missing it alone is a minor gap."
+      how_to_fix: "Update the account password policy to set RequireNumbers=true."
+      automation_example: "aws iam update-account-password-policy --require-numbers"
+
+  - id: iam-account-password-max-age-too-long
+    applies_to_resource_type: iam_account_summary
+    framework: iso_27001
+    control_id: A.5.17
+    domain: iam
+    severity: low
+    confidence: medium
+    service: iam
+    version: "1.0.0"
+    title: "AWS account password policy allows passwords older than 90 days"
+    description: "MaxPasswordAge is unset or greater than 90 days."
+    rationale: "A bounded maximum age limits how long a leaked-but-undetected password stays usable. Modern guidance (e.g. NIST 800-63B) deprioritizes forced rotation in favor of length/MFA, so this is intentionally kept LOW severity/MEDIUM confidence rather than treated as a hard requirement."
+    condition:
+      field: password_policy_max_age_days
+      operator: greater_than
+      value: 90
+    evidence_template: "AWS account password policy allows passwords to remain valid for {password_policy_max_age_days} days."
+    tags: [iam, password-policy, account]
+    remediation:
+      summary: "Set (or lower) the account password policy's maximum password age."
+      why_it_matters: "A very long or unbounded max age means a password leaked years ago could still be valid today."
+      how_to_fix: "Set MaxPasswordAge to 90 days or fewer, or rely primarily on MFA and treat this as a secondary control per current NIST guidance."
+      automation_example: "aws iam update-account-password-policy --max-password-age 90"

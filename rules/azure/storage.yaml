@@ -1,0 +1,216 @@
+# Azure Storage Account rules.
+#
+# The Azure half of the multi-cloud catalog. These load through exactly
+# the same YamlRuleCatalog and evaluate through exactly the same Rule
+# Engine as rules/aws/ — the DSL, three-valued logic, and evidence
+# rendering needed no Azure-specific changes.
+#
+# Attribute names follow Azure's own vocabulary (see
+# infrastructure/cloud/azure/normalizers/storage.py for why): a rule
+# author reading this file should see the same names the Azure portal
+# shows them.
+#
+# `domain` values are shared with the AWS catalog (storage/network/
+# iam/encryption/logging) so cross-provider reporting groups sensibly;
+# `service` is Azure-specific.
+rules:
+  - id: azure-storage-account-allows-blob-public-access
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: critical
+    confidence: high
+    service: storage
+    version: "1.0.0"
+    title: "Storage account allows anonymous blob public access"
+    description: >
+      `allowBlobPublicAccess` is enabled, so individual containers in
+      this account can be configured for anonymous public read — the
+      Azure equivalent of a public S3 bucket.
+    rationale: >
+      Anonymous blob access is a leading cause of Azure data exposure,
+      and it is enabled at the account level, which makes every
+      container in the account a potential exposure point.
+    condition:
+      field: allow_blob_public_access
+      operator: equals
+      value: true
+    evidence_template: "Storage account {name} ({resource_id}) allows anonymous blob public access."
+    tags: [storage, exposure, data-protection]
+    references:
+      - "https://learn.microsoft.com/azure/storage/blobs/anonymous-read-access-prevent"
+    framework_mappings:
+      - framework: cis_azure
+        control: "3.7"
+    remediation:
+      summary: "Disable allowBlobPublicAccess on the storage account."
+      why_it_matters: "Any container in this account can be made anonymously readable by anyone on the internet."
+      how_to_fix: "Set the account's `allowBlobPublicAccess` property to false; grant access with SAS tokens or Entra ID RBAC instead."
+      automation_example: "az storage account update --name <account> --resource-group <rg> --allow-blob-public-access false"
+
+  - id: azure-storage-account-https-not-enforced
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: high
+    confidence: high
+    service: storage
+    version: "1.0.0"
+    title: "Storage account does not require HTTPS"
+    description: "`supportsHttpsTrafficOnly` is disabled, so data can be transferred to and from this account over plaintext HTTP."
+    rationale: "Without HTTPS enforcement, credentials (SAS tokens in URLs) and data are transmitted in cleartext and are interceptable in transit."
+    condition:
+      field: https_only
+      operator: equals
+      value: false
+    evidence_template: "Storage account {name} ({resource_id}) permits plaintext HTTP traffic."
+    tags: [storage, encryption, transport]
+    framework_mappings:
+      - framework: cis_azure
+        control: "3.1"
+    remediation:
+      summary: "Require secure transfer on the storage account."
+      why_it_matters: "Data and SAS tokens for this account can currently be sent over unencrypted HTTP."
+      how_to_fix: "Enable the 'secure transfer required' setting."
+      automation_example: "az storage account update --name <account> --resource-group <rg> --https-only true"
+
+  - id: azure-storage-account-weak-tls-version
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: medium
+    confidence: high
+    service: storage
+    version: "1.0.0"
+    title: "Storage account accepts TLS versions below 1.2"
+    description: "`minimumTlsVersion` is set below TLS1_2."
+    rationale: "TLS 1.0 and 1.1 are deprecated and carry known weaknesses; TLS 1.2 is the current baseline for every major compliance framework."
+    condition:
+      field: minimum_tls_version
+      operator: in
+      value: ["TLS1_0", "TLS1_1"]
+    evidence_template: "Storage account {name} accepts {minimum_tls_version}, below the TLS 1.2 baseline."
+    tags: [storage, encryption, transport]
+    framework_mappings:
+      - framework: cis_azure
+        control: "3.15"
+    remediation:
+      summary: "Set the minimum TLS version to 1.2."
+      why_it_matters: "Clients can currently negotiate a deprecated TLS version with known weaknesses."
+      how_to_fix: "Set `minimumTlsVersion` to TLS1_2."
+      automation_example: "az storage account update --name <account> --resource-group <rg> --min-tls-version TLS1_2"
+
+  - id: azure-storage-account-network-default-allow
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: high
+    service: storage
+    version: "1.0.0"
+    title: "Storage account firewall allows all networks by default"
+    description: "The account's network rule set has `defaultAction: Allow`, so it is reachable from any network."
+    rationale: "A default-allow firewall means the account's only protection is credential secrecy; a default-deny posture with explicit allowances is the defensible configuration."
+    condition:
+      field: network_default_action
+      operator: equals
+      value: Allow
+    evidence_template: "Storage account {name} has a default-allow network rule set (reachable from any network)."
+    tags: [storage, network, exposure]
+    framework_mappings:
+      - framework: cis_azure
+        control: "3.8"
+    remediation:
+      summary: "Set the storage account firewall's default action to Deny."
+      why_it_matters: "This account currently accepts connections from any network, including the public internet."
+      how_to_fix: "Set the default action to Deny and add explicit virtual-network or IP allowances for legitimate clients."
+      automation_example: "az storage account update --name <account> --resource-group <rg> --default-action Deny"
+
+  - id: azure-storage-account-blob-soft-delete-disabled
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.13
+    domain: storage
+    severity: medium
+    confidence: high
+    service: storage
+    version: "1.0.0"
+    title: "Storage account blob soft delete is disabled"
+    description: "Blob soft-delete retention is not enabled, so deleted or overwritten blobs are unrecoverable."
+    rationale: "Soft delete is Azure's counterpart to S3 versioning — the primary native control against accidental or malicious data destruction."
+    condition:
+      field: blob_soft_delete_enabled
+      operator: equals
+      value: false
+    evidence_template: "Storage account {name} does not have blob soft delete enabled."
+    tags: [storage, data-protection, resilience]
+    remediation:
+      summary: "Enable blob soft delete with a retention period."
+      why_it_matters: "A deleted or overwritten blob in this account cannot currently be recovered."
+      how_to_fix: "Enable blob soft delete with a retention period appropriate to your recovery objectives."
+      automation_example: "az storage account blob-service-properties update --account-name <account> --resource-group <rg> --enable-delete-retention true --delete-retention-days 7"
+
+  - id: azure-storage-account-infrastructure-encryption-disabled
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: low
+    confidence: medium
+    service: storage
+    version: "1.0.0"
+    title: "Storage account does not use infrastructure (double) encryption"
+    description: >
+      `requireInfrastructureEncryption` is disabled. Note that Azure
+      Storage ALWAYS encrypts data at rest — this rule is about the
+      optional second layer, not about unencrypted data.
+    rationale: >
+      Kept LOW/MEDIUM deliberately: single-layer encryption at rest is
+      the secure Azure default and is adequate for most workloads.
+      Infrastructure encryption matters for regulated workloads that
+      require defense-in-depth against a single-layer failure.
+    condition:
+      field: infrastructure_encryption_enabled
+      operator: equals
+      value: false
+    evidence_template: "Storage account {name} does not have infrastructure (double) encryption enabled."
+    tags: [storage, encryption, hygiene]
+    remediation:
+      summary: "Consider infrastructure encryption for regulated workloads."
+      why_it_matters: "Data is already encrypted at rest; this is an optional second layer, relevant mainly to regulated data."
+      how_to_fix: "Infrastructure encryption can only be enabled at account creation — re-create the account with the option set if your workload requires it."
+
+  - id: azure-storage-account-publicly-reachable
+    applies_to_resource_type: azure_storage_account
+    framework: iso_27001
+    control_id: A.8.24
+    domain: storage
+    severity: critical
+    confidence: medium
+    service: storage
+    version: "1.0.0"
+    title: "Storage account is exposed through any known public-access path"
+    description: >
+      Composite check: true if the account allows anonymous blob public
+      access OR its firewall defaults to Allow. A single "is this
+      account exposed" signal complementing the two narrower rules,
+      each of which identifies a specific exposure mechanism.
+    rationale: "A reviewer triaging exposure risk usually wants one composite signal before drilling into which specific control is missing."
+    condition:
+      or:
+        - field: allow_blob_public_access
+          operator: equals
+          value: true
+        - field: network_default_action
+          operator: equals
+          value: Allow
+    evidence_template: "Storage account {name} is exposed through at least one public-access path (anonymous blob access or default-allow firewall)."
+    tags: [storage, exposure, composite]
+    remediation:
+      summary: "Investigate which of the two exposure rules triggered and fix it directly."
+      why_it_matters: "This composite finding catches either of two distinct exposure mechanisms; the narrower rules identify exactly which applies."
+      how_to_fix: "See the `azure-storage-account-allows-blob-public-access` and `azure-storage-account-network-default-allow` findings for this same account."

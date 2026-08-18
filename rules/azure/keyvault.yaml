@@ -1,0 +1,135 @@
+# Azure Key Vault rules.
+#
+# The Azure counterpart of rules/aws/kms.yaml. Soft delete and purge
+# protection are the analogue of the KMS `PendingDeletion` concern:
+# they are what makes a deleted vault (and every key, secret, and
+# certificate in it) recoverable rather than irreversibly gone.
+rules:
+  - id: azure-key-vault-soft-delete-disabled
+    applies_to_resource_type: azure_key_vault
+    framework: iso_27001
+    control_id: A.8.13
+    domain: encryption
+    severity: high
+    confidence: high
+    service: keyvault
+    version: "1.0.0"
+    title: "Key Vault soft delete is disabled"
+    description: "`enableSoftDelete` is disabled, so a deleted vault and its contents are immediately and permanently unrecoverable."
+    rationale: "Deleting a vault without soft delete destroys every key in it; any data encrypted under those keys becomes permanently unreadable. This is one of the few genuinely irreversible Azure operations."
+    condition:
+      field: soft_delete_enabled
+      operator: equals
+      value: false
+    evidence_template: "Key Vault {name} does not have soft delete enabled."
+    tags: [keyvault, encryption, availability]
+    framework_mappings:
+      - framework: cis_azure
+        control: "8.4"
+    remediation:
+      summary: "Enable soft delete on the vault."
+      why_it_matters: "An accidental or malicious deletion of this vault would permanently destroy every key, secret, and certificate in it."
+      how_to_fix: "Enable soft delete (it is enabled by default on vaults created recently and cannot be disabled once on)."
+      automation_example: "az keyvault update --name <vault> --resource-group <rg> --enable-soft-delete true"
+
+  - id: azure-key-vault-purge-protection-disabled
+    applies_to_resource_type: azure_key_vault
+    framework: iso_27001
+    control_id: A.8.13
+    domain: encryption
+    severity: medium
+    confidence: high
+    service: keyvault
+    version: "1.0.0"
+    title: "Key Vault purge protection is disabled"
+    description: "`enablePurgeProtection` is disabled, so a soft-deleted vault can still be purged before its retention period elapses."
+    rationale: "Soft delete alone can be defeated by an attacker (or a mistake) that purges the soft-deleted vault immediately; purge protection is what makes the retention window actually binding."
+    condition:
+      field: purge_protection_enabled
+      operator: equals
+      value: false
+    evidence_template: "Key Vault {name} does not have purge protection enabled."
+    tags: [keyvault, encryption, availability]
+    framework_mappings:
+      - framework: cis_azure
+        control: "8.5"
+    remediation:
+      summary: "Enable purge protection on the vault."
+      why_it_matters: "A soft-deleted copy of this vault could be permanently purged before its retention period expires, defeating soft delete."
+      how_to_fix: "Enable purge protection. Note this is irreversible by design — the vault cannot be force-deleted afterwards."
+      automation_example: "az keyvault update --name <vault> --resource-group <rg> --enable-purge-protection true"
+
+  - id: azure-key-vault-rbac-authorization-disabled
+    applies_to_resource_type: azure_key_vault
+    framework: iso_27001
+    control_id: A.5.15
+    domain: iam
+    severity: low
+    confidence: medium
+    service: keyvault
+    version: "1.0.0"
+    title: "Key Vault uses legacy access policies rather than RBAC"
+    description: "`enableRbacAuthorization` is disabled, so access is governed by per-vault access policies instead of Azure RBAC."
+    rationale: >
+      Kept LOW/MEDIUM deliberately: access policies are a supported,
+      functional model, not a vulnerability. RBAC is preferred because
+      it is centrally auditable, supports Privileged Identity
+      Management, and uses the same role model as the rest of Azure.
+    condition:
+      field: rbac_authorization_enabled
+      operator: equals
+      value: false
+    evidence_template: "Key Vault {name} uses legacy access policies rather than Azure RBAC."
+    tags: [keyvault, iam, hygiene]
+    remediation:
+      summary: "Migrate the vault to Azure RBAC authorization."
+      why_it_matters: "Access to this vault is governed outside the central RBAC model, making organization-wide access review harder."
+      how_to_fix: "Assign equivalent RBAC roles, verify access, then enable RBAC authorization on the vault."
+
+  - id: azure-key-vault-public-network-access-enabled
+    applies_to_resource_type: azure_key_vault
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: high
+    service: keyvault
+    version: "1.0.0"
+    title: "Key Vault is reachable from public networks"
+    description: "`publicNetworkAccess` is enabled on the vault."
+    rationale: "A vault reachable from the public internet is protected only by credential secrecy; private endpoints plus a default-deny firewall remove that entire attack surface."
+    condition:
+      field: public_network_access_enabled
+      operator: equals
+      value: true
+    evidence_template: "Key Vault {name} is reachable from public networks."
+    tags: [keyvault, network, exposure]
+    remediation:
+      summary: "Disable public network access and use a private endpoint."
+      why_it_matters: "This vault's management and data endpoints are currently reachable from the public internet."
+      how_to_fix: "Create a private endpoint for the vault, verify connectivity, then disable public network access."
+      automation_example: "az keyvault update --name <vault> --resource-group <rg> --public-network-access Disabled"
+
+  - id: azure-key-vault-network-default-allow
+    applies_to_resource_type: azure_key_vault
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    confidence: high
+    service: keyvault
+    version: "1.0.0"
+    title: "Key Vault firewall allows all networks by default"
+    description: "The vault's network ACLs have `defaultAction: Allow`."
+    rationale: "A default-allow firewall on a secrets store means any network can reach it; default-deny with explicit allowances is the defensible posture."
+    condition:
+      field: network_default_action
+      operator: equals
+      value: Allow
+    evidence_template: "Key Vault {name} has a default-allow network rule set."
+    tags: [keyvault, network, exposure]
+    remediation:
+      summary: "Set the vault firewall's default action to Deny."
+      why_it_matters: "This vault currently accepts connections from any network."
+      how_to_fix: "Set the default action to Deny and add explicit virtual-network or IP allowances for legitimate clients."
+      automation_example: "az keyvault network-rule update --name <vault> --resource-group <rg> --default-action Deny"

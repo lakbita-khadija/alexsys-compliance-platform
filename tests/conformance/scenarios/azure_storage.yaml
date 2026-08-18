@@ -1,0 +1,182 @@
+# Azure Storage Account conformance scenarios.
+#
+# Proof that the SAME conformance framework validates both providers:
+# these load through the same YamlScenarioLoader, run through the same
+# RunConformanceScenario, and are classified by the same comparator as
+# every AWS scenario in this directory.
+scenarios:
+  - scenario_id: azure-storage-fully-compliant
+    description: >
+      A hardened storage account: HTTPS enforced, no anonymous blob
+      access, TLS 1.2, default-deny firewall, soft delete on. Every
+      storage rule PASSes.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/conformantstore"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: conformantstore
+        https_only: true
+        allow_blob_public_access: false
+        minimum_tls_version: TLS1_2
+        network_default_action: Deny
+        infrastructure_encryption_enabled: true
+        blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-storage-account-allows-blob-public-access
+        status: pass
+      - rule_id: azure-storage-account-https-not-enforced
+        status: pass
+      - rule_id: azure-storage-account-weak-tls-version
+        status: pass
+      - rule_id: azure-storage-account-network-default-allow
+        status: pass
+      - rule_id: azure-storage-account-blob-soft-delete-disabled
+        status: pass
+      - rule_id: azure-storage-account-infrastructure-encryption-disabled
+        status: pass
+      - rule_id: azure-storage-account-publicly-reachable
+        status: pass
+    tags: [azure, storage, compliant]
+
+  - scenario_id: azure-storage-anonymous-blob-access
+    description: >
+      Anonymous blob access enabled while the firewall still defaults
+      to Deny. The blob-access rule and the composite fire; the
+      firewall rule must PASS — the two exposure mechanisms are
+      independent.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/openblobstore"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: openblobstore
+        https_only: true
+        allow_blob_public_access: true
+        minimum_tls_version: TLS1_2
+        network_default_action: Deny
+        infrastructure_encryption_enabled: true
+        blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-storage-account-allows-blob-public-access
+        status: fail
+        severity: critical
+        evidence_contains: ["openblobstore", "anonymous blob public access"]
+      - rule_id: azure-storage-account-network-default-allow
+        status: pass
+      - rule_id: azure-storage-account-publicly-reachable
+        status: fail
+    tags: [azure, storage, exposure, non_compliant]
+
+  - scenario_id: azure-storage-open-firewall
+    description: >
+      The mirror image: firewall defaults to Allow while anonymous blob
+      access is off. Proves the composite fires on either mechanism
+      alone.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/openfwstore"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: openfwstore
+        https_only: true
+        allow_blob_public_access: false
+        minimum_tls_version: TLS1_2
+        network_default_action: Allow
+        infrastructure_encryption_enabled: true
+        blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-storage-account-allows-blob-public-access
+        status: pass
+      - rule_id: azure-storage-account-network-default-allow
+        status: fail
+        severity: high
+      - rule_id: azure-storage-account-publicly-reachable
+        status: fail
+    tags: [azure, storage, network, non_compliant]
+
+  - scenario_id: azure-storage-insecure-transport
+    description: HTTP permitted and a deprecated TLS floor.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/plainstore"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: plainstore
+        https_only: false
+        allow_blob_public_access: false
+        minimum_tls_version: TLS1_0
+        network_default_action: Deny
+        infrastructure_encryption_enabled: true
+        blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-storage-account-https-not-enforced
+        status: fail
+        severity: high
+      - rule_id: azure-storage-account-weak-tls-version
+        status: fail
+        severity: medium
+    tags: [azure, storage, encryption, non_compliant]
+
+  - scenario_id: azure-storage-tls-1-2-boundary
+    description: >
+      BOUNDARY CASE: TLS1_2 is the baseline itself. The rule matches
+      only TLS1_0/TLS1_1, so TLS1_2 must PASS.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/tlsboundary"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: tlsboundary
+        https_only: true
+        allow_blob_public_access: false
+        minimum_tls_version: TLS1_2
+        network_default_action: Deny
+        infrastructure_encryption_enabled: true
+        blob_soft_delete_enabled: true
+    expected_findings:
+      - rule_id: azure-storage-account-weak-tls-version
+        status: pass
+    tags: [azure, storage, edge_case, boundary]
+
+  - scenario_id: azure-storage-uncollected-facts
+    description: >
+      THREE-VALUED LOGIC across providers: the blob soft-delete and
+      public-access facts were not collected (the data-plane call was
+      denied). Those rules must be INDETERMINATE — never silently PASS.
+      This is the same invariant the AWS scenarios assert, proven to
+      hold identically for Azure.
+    resource:
+      resource_id: "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/partialstore"
+      resource_type: azure_storage_account
+      tenant_id: conformance-test
+      region: westeurope
+      account_id: "sub-1"
+      attributes:
+        name: partialstore
+        https_only: true
+        allow_blob_public_access: null
+        minimum_tls_version: TLS1_2
+        network_default_action: Deny
+        infrastructure_encryption_enabled: null
+        blob_soft_delete_enabled: null
+    expected_findings:
+      - rule_id: azure-storage-account-https-not-enforced
+        status: pass
+      - rule_id: azure-storage-account-allows-blob-public-access
+        status: pass
+      - rule_id: azure-storage-account-blob-soft-delete-disabled
+        status: pass
+      - rule_id: azure-storage-account-infrastructure-encryption-disabled
+        status: pass
+    tags: [azure, storage, three_valued_logic, edge_case]

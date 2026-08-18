@@ -1,0 +1,149 @@
+# EC2 instance rules (Phase 3B senior catalog).
+#
+# Targets the `ec2_instance` resource type using the exposure/hardening
+# facts collected in Phase 3B (infrastructure/cloud/aws/resource_collectors/ec2.py):
+# public_ip, instance_profile_arn, imds_v2_required, root_volume_encrypted.
+#
+# `root_volume_encrypted` follows the same "present but None means the
+# question doesn't apply, not a violation" precedent already established
+# for KMS `rotation_enabled` (see rules/aws/kms.yaml) — an
+# instance-store-backed instance has no EBS root volume to encrypt.
+rules:
+  - id: ec2-instance-public-ip-assigned
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance has a public IP address"
+    description: "The instance has a public IPv4 address directly assigned."
+    rationale: "A public IP puts the instance directly on the internet; combined with any permissive security group, this is a direct exposure path this rule alone can't see — it flags the precondition."
+    condition:
+      field: public_ip
+      operator: is_not_null
+    evidence_template: "EC2 instance {resource_id} has public IP {public_ip} assigned."
+    tags: [ec2, exposure, network]
+    remediation:
+      summary: "Remove the public IP unless internet-facing access is genuinely required, or place the instance behind a load balancer/NAT instead."
+      why_it_matters: "This instance is directly reachable from the internet at its public IP, subject only to its security group rules."
+      how_to_fix: "Launch in a private subnet with no public IP, and front internet-facing workloads with a load balancer or bastion/NAT gateway instead."
+
+  - id: ec2-instance-no-iam-instance-profile
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.5.15
+    domain: iam
+    severity: low
+    confidence: medium
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance has no IAM instance profile attached"
+    description: "No IamInstanceProfile is attached to the instance."
+    rationale: "Without an instance profile, workloads on this instance cannot use short-lived, auto-rotated credentials, and typically fall back to long-lived static credentials stored on disk instead — a materially worse credential-management posture."
+    condition:
+      field: instance_profile_arn
+      operator: is_null
+    evidence_template: "EC2 instance {resource_id} has no IAM instance profile attached."
+    tags: [ec2, iam, credentials]
+    remediation:
+      summary: "Attach an IAM instance profile scoped to what this instance's workload actually needs."
+      why_it_matters: "Without an instance profile, any AWS API access from this instance likely relies on long-lived static credentials instead of automatically-rotated temporary ones."
+      how_to_fix: "Create an IAM role with least-privilege permissions for this instance's workload and attach it as an instance profile."
+
+  - id: ec2-instance-imds-v1-allowed
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance allows IMDSv1 (IMDSv2 not required)"
+    description: "MetadataOptions.HttpTokens is not set to 'required', so the legacy, non-session-authenticated instance metadata service (IMDSv1) is still reachable."
+    rationale: "IMDSv1 is the mechanism behind a well-known class of SSRF-to-credential-theft attacks (an attacker-controlled request from the instance can retrieve the instance's IAM credentials); IMDSv2 requires a session token that SSRF alone cannot obtain."
+    condition:
+      field: imds_v2_required
+      operator: equals
+      value: false
+    evidence_template: "EC2 instance {resource_id} does not require IMDSv2 (IMDSv1 is still reachable)."
+    tags: [ec2, ssrf, credentials]
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.6"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Require IMDSv2 on the instance."
+      why_it_matters: "An SSRF vulnerability in any application on this instance can currently be used to steal its IAM credentials via IMDSv1."
+      how_to_fix: "Set the instance's metadata options to HttpTokens=required (IMDSv2 only)."
+      automation_example: "aws ec2 modify-instance-metadata-options --instance-id <id> --http-tokens required --http-endpoint enabled"
+
+  - id: ec2-instance-root-volume-not-encrypted
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: high
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance root EBS volume is not encrypted"
+    description: >
+      The instance's root EBS volume has Encrypted=false.
+      (`root_volume_encrypted` is `None`, not a violation, when the
+      root device isn't backed by an EBS volume at all.)
+    rationale: "An unencrypted root volume exposes data at rest to anyone who can access the underlying EBS snapshot, independent of any OS-level access control."
+    condition:
+      field: root_volume_encrypted
+      operator: equals
+      value: false
+    evidence_template: "EC2 instance {resource_id} has an unencrypted root EBS volume."
+    tags: [ec2, encryption]
+    framework_mappings:
+      - framework: cis_aws
+        control: "2.2.1"
+    remediation:
+      summary: "Re-create the instance with an encrypted root volume, or enable EBS encryption by default for the account/region."
+      why_it_matters: "Anyone who can access a snapshot of this volume can read its contents in plaintext."
+      how_to_fix: "Enable 'EBS encryption by default' for the account/region so all future volumes are encrypted; for this instance, snapshot, copy with encryption enabled, and re-launch from the encrypted snapshot."
+      automation_example: "aws ec2 enable-ebs-encryption-by-default --region <region>"
+
+  - id: ec2-instance-attached-to-open-security-group
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: medium
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance is attached to a security group with unrestricted internet ingress"
+    description: >
+      Cross-resource check using the ATTACHED_TO graph relationship
+      (ec2_instance -> security_group, from the instance's
+      SecurityGroups list): true if any attached security group has at
+      least one ingress rule open to 0.0.0.0/0 or ::/0.
+    rationale: "The instance-level view of exposure — a compliant-looking instance can still be directly reachable from the internet if any one of its attached security groups is permissive."
+    condition:
+      relationship: attached_to
+      direction: outgoing
+      target_type: security_group
+      where:
+        field: has_unrestricted_ingress
+        operator: equals
+        value: true
+    evidence_template: "EC2 instance {resource_id} is attached to at least one security group with unrestricted internet ingress."
+    tags: [ec2, network, exposure, relationship, composite]
+    remediation:
+      summary: "Fix the unrestricted ingress rule on the attached security group."
+      why_it_matters: "This instance is reachable from the internet through at least one of its attached security groups."
+      how_to_fix: "Locate the referenced security group's own finding (security-group-ssh-open-to-world and similar) and restrict its unrestricted ingress rule."

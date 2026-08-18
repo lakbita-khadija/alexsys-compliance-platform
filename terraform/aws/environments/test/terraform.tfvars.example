@@ -1,0 +1,10 @@
+# Copy this file to terraform.tfvars (which is .gitignore'd — never
+# commit it) and adjust as needed. No credentials belong in this file —
+# AWS authentication is handled entirely outside Terraform, via your
+# normal AWS credential chain (env vars, `~/.aws/credentials` profile,
+# or an assumed role). See ../../README.md, "Credentials".
+
+environment = "test"
+aws_region  = "us-east-1"
+tenant_id   = "complianceiq-test-tenant"
+name_prefix = "complianceiq-test"

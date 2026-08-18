@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Credentials — both providers' default credential chains read
+# environment variables, so a local .env is the most likely place a
+# real secret would ever land in this tree. Never commit one.
+.env
+.env.*
+!.env.example
+.aws/
+.azure/
+*.pem
+*.key
+!**/*.pub
+
+# Terraform — never commit state (it can contain resource attribute
+# values, including sensitive ones) or real variable values.
+**/.terraform/
+**/.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.env

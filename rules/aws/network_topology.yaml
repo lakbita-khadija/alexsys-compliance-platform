@@ -1,0 +1,244 @@
+# AWS network topology rules.
+#
+# These exist to CONSUME the data the STEP 8A collectors produce. Before
+# them, all 31 network attributes were dead: collected, normalized,
+# graphed, and read by nothing.
+#
+# Deliberately few. The goal is that every meaningful security field has
+# at least one justified consumer — not that the rule count rises. Two of
+# the three below are cross-resource, because a single rule that joins
+# two facts is worth more than five that restate one.
+#
+# framework_mappings stay `unresolved`: no maintainer has checked these
+# against the published CIS/ISO text, and `verified` requires provenance
+# (STEP 7). Marking them verified because they look plausible is exactly
+# the fabrication the catalog forbids.
+rules:
+  # -------------------------------------------------------------------
+  # Network ACL
+  # -------------------------------------------------------------------
+  - id: nacl-allows-unrestricted-ingress
+    applies_to_resource_type: aws_network_acl
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    version: "1.0.0"
+    title: "Network ACL allows unrestricted ingress"
+    description: >-
+      A network ACL has an ALLOW ingress entry whose source is 0.0.0.0/0
+      or ::/0. The NACL is the subnet-level filter, so this removes a
+      whole layer of defence for every subnet it is associated with —
+      leaving security groups as the only control.
+    condition:
+      field: has_unrestricted_ingress_rule
+      operator: is_true
+    evidence_template: >-
+      Network ACL {resource_id} has at least one ALLOW ingress entry open
+      to the whole internet.
+    remediation:
+      summary: "Restrict the ACL's ingress entries to known source ranges."
+      why_it_matters: >-
+        A NACL is the stateless, subnet-wide filter. An allow-all entry
+        means the subnet boundary enforces nothing and every instance in
+        it depends entirely on its own security group being correct.
+      how_to_fix: >-
+        Replace the 0.0.0.0/0 ALLOW entry with specific source CIDRs, or
+        raise its rule number so a narrower DENY is evaluated first.
+      verification: >-
+        aws ec2 describe-network-acls --network-acl-ids <id> and confirm
+        no ALLOW entry has CidrBlock 0.0.0.0/0.
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.1"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 5 covers networking. Not verified
+          against the published benchmark text.
+    tags: [network, nacl, exposure]
+
+  # -------------------------------------------------------------------
+  # Route table
+  # -------------------------------------------------------------------
+  - id: route-table-has-internet-route
+    applies_to_resource_type: aws_route_table
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: low
+    version: "1.0.0"
+    title: "Route table has a default route to an internet gateway"
+    description: >-
+      The route table carries 0.0.0.0/0 (or ::/0) to an internet gateway.
+      This is PUBLIC ROUTING, which is a fact about topology — it is NOT
+      the same as confirmed attacker reachability, and the severity
+      reflects that. Whether anything is actually reachable depends on
+      the security groups and NACLs in front of it.
+    condition:
+      field: has_internet_route
+      operator: is_true
+    evidence_template: >-
+      Route table {resource_id} routes a default destination to an
+      internet gateway (public routing). This describes topology, not
+      confirmed reachability.
+    remediation:
+      summary: "Confirm this route table is intended to be public."
+      why_it_matters: >-
+        Public routing is legitimate for a public subnet and wrong for a
+        private one. The finding exists so the intent is explicit rather
+        than assumed — every subnet this table governs is one firewall
+        mistake away from being internet-facing.
+      how_to_fix: >-
+        For a private subnet, replace the internet gateway target with a
+        NAT gateway so egress works without inbound reachability.
+      verification: >-
+        aws ec2 describe-route-tables --route-table-ids <id> and confirm
+        no 0.0.0.0/0 route targets an igw-.
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.1"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 5 covers networking. Not verified
+          against the published benchmark text.
+    tags: [network, routing, topology]
+
+  # -------------------------------------------------------------------
+  # Subnet — cross-resource
+  # -------------------------------------------------------------------
+  - id: subnet-auto-assigns-public-ip-with-internet-route
+    applies_to_resource_type: aws_subnet
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    version: "1.0.0"
+    title: "Subnet auto-assigns public IPs and routes to the internet"
+    description: >-
+      BOTH halves are required, deliberately. `map_public_ip_on_launch`
+      alone means instances get a public address that may route nowhere;
+      an internet route alone means the subnet can reach out but its
+      instances have no public address. Together they mean every instance
+      launched here is internet-addressable by default, which is a
+      property of the subnet rather than of any one workload.
+    condition:
+      and:
+        - field: map_public_ip_on_launch
+          operator: is_true
+        # Traverses INCOMING because the route table declares the
+        # association (AWS reports it on that side).
+        - relationship: attached_to
+          direction: incoming
+          target_type: aws_route_table
+          where:
+            field: has_internet_route
+            operator: is_true
+    evidence_template: >-
+      Subnet {resource_id} assigns public IPs on launch AND is associated
+      with a route table that has a default route to an internet gateway.
+    remediation:
+      summary: "Disable auto-assign public IP, or move workloads to a private subnet."
+      why_it_matters: >-
+        Every instance launched in this subnet becomes internet-
+        addressable without anyone choosing it. That turns a security
+        decision into a default, and defaults are what get forgotten.
+      how_to_fix: >-
+        aws ec2 modify-subnet-attribute --subnet-id <id>
+        --no-map-public-ip-on-launch, or place private workloads in a
+        subnet whose route table targets a NAT gateway.
+      verification: >-
+        aws ec2 describe-subnets --subnet-ids <id> and confirm
+        MapPublicIpOnLaunch is false.
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.1"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 5 covers networking. Not verified
+          against the published benchmark text.
+    tags: [network, subnet, exposure, relationship, composite]
+
+  # -------------------------------------------------------------------
+  # EC2 -> subnet -> route table (STEP 8A.1)
+  # -------------------------------------------------------------------
+  #
+  # The consumer of the `ec2_instance --ATTACHED_TO--> aws_subnet` edge
+  # STEP 8A.1 added, and the reason that edge was worth adding. Nothing
+  # else in the catalog can reach from a workload to the routing that
+  # governs it: before the edge, `subnet_id` was an opaque string.
+  #
+  # Two hops, which the DSL supports because a relationship node's
+  # `where` is evaluated recursively with the graph threaded through.
+  - id: ec2-instance-in-internet-routed-subnet-with-public-ip
+    applies_to_resource_type: ec2_instance
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: medium
+    confidence: medium
+    service: ec2
+    version: "1.0.0"
+    title: "EC2 instance has a public IP in a subnet routed to the internet"
+    description: >-
+      The instance carries a public address AND sits in a subnet whose
+      route table has a default route to an internet gateway. Both halves
+      are required: a public IP in a subnet with no internet route
+      reaches nothing, and an internet-routed subnet does nothing for an
+      instance with no public address.
+      This is INTERNET-ADDRESSABLE, not confirmed reachable — the
+      security group is still the deciding control, and
+      `ec2-instance-attached-to-open-security-group` is the rule that
+      asserts the firewall half. Severity is medium for exactly that
+      reason: a correctly firewalled public instance is a normal, working
+      architecture, not a violation.
+    rationale: >-
+      Public routing was previously only visible on the route table,
+      where nobody could tell which workloads it affected. This is the
+      workload-level view, and it is the first check in the catalog that
+      traverses from an instance to the network layer governing it.
+    condition:
+      and:
+        - field: public_ip
+          operator: is_not_null
+        # Hop 1: the instance's own placement, from
+        # DescribeInstances.Instances[].SubnetId.
+        - relationship: attached_to
+          direction: outgoing
+          target_type: aws_subnet
+          where:
+            # Hop 2: traversed INCOMING because the route table declares
+            # the association — AWS reports it on that side.
+            relationship: attached_to
+            direction: incoming
+            target_type: aws_route_table
+            where:
+              field: has_internet_route
+              operator: is_true
+    evidence_template: >-
+      EC2 instance {resource_id} has a public IP and is placed in a
+      subnet whose route table routes a default destination to an
+      internet gateway. This establishes internet addressability; the
+      attached security groups determine actual reachability.
+    remediation:
+      summary: "Move the instance to a private subnet, or remove its public IP."
+      why_it_matters: >-
+        Nothing but the security group stands between this instance and
+        the internet. That is one misconfiguration away from direct
+        exposure, and the instance is reachable the moment anyone widens
+        an ingress rule.
+      how_to_fix: >-
+        Place the instance in a subnet whose route table targets a NAT
+        gateway rather than an internet gateway, and reach it through a
+        load balancer or bastion instead of a public address.
+      verification: >-
+        aws ec2 describe-route-tables
+        --filters Name=association.subnet-id,Values=<subnet-id> and
+        confirm no 0.0.0.0/0 route targets an igw-.
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.1"
+        status: unresolved
+        rationale: >-
+          CIS AWS Foundations section 5 covers networking. Not verified
+          against the published benchmark text.
+    tags: [ec2, network, subnet, exposure, relationship, composite]

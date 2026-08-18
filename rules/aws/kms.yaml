@@ -1,0 +1,125 @@
+# KMS key rules (Phase 3B senior catalog).
+#
+# Grounded in blueprint §15: "rotation activée" (compliant) vs
+# "rotation désactivée" (non-compliant).
+#
+# `rotation_enabled` is `None` (not `False`) for AWS-managed keys
+# (infrastructure/cloud/aws/normalizers/kms.py), since the setting
+# doesn't apply to them. Verified behavior: the field is *present*
+# (just `None`), so the evaluator compares `None == False` -> NOT
+# equal -> NOT_MATCHED -> PASS, not INDETERMINATE (INDETERMINATE is
+# only for a field that's *absent*, per domain/rules/conditions.py).
+# This still isn't misleading: AWS-managed keys are rotated
+# automatically by AWS regardless of this setting, so "not flagged as
+# a violation" is the correct real-world outcome here, not a
+# false pass.
+rules:
+  - id: kms-key-rotation-disabled
+    applies_to_resource_type: kms_key
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: medium
+    confidence: high
+    service: kms
+    version: "1.1.0"
+    title: "Customer-managed KMS key does not have automatic rotation enabled"
+    description: "GetKeyRotationStatus reports KeyRotationEnabled=false for a customer-managed key."
+    rationale: "Automatic annual rotation limits how long any single key material version remains in use, bounding the impact of an eventual key compromise without requiring manual re-encryption."
+    condition:
+      field: rotation_enabled
+      operator: equals
+      value: false
+    evidence_template: "KMS key {resource_id} does not have automatic key rotation enabled."
+    tags: [kms, encryption]
+    framework_mappings:
+      - framework: cis_aws
+        control: "3.8"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Enable automatic key rotation."
+      why_it_matters: "The same underlying key material has been in continuous use with no rotation, widening the blast radius of an eventual key compromise."
+      how_to_fix: "Enable automatic annual rotation for the key."
+      automation_example: "aws kms enable-key-rotation --key-id <key-id>"
+
+  - id: kms-key-policy-allows-public-access
+    applies_to_resource_type: kms_key
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: critical
+    confidence: high
+    service: kms
+    version: "1.0.0"
+    title: "KMS key policy grants access to any principal"
+    description: >
+      The key policy contains an unconditional Allow statement with
+      principal "*" (see infrastructure/cloud/aws/policy_analysis.py).
+    rationale: "A KMS key with a wildcard-principal policy can be used to encrypt/decrypt/sign by anyone (or anyone with an AWS account, depending on the exact statement), which is almost never the intended access model for a customer-managed key."
+    condition:
+      field: key_policy_allows_public_access
+      operator: equals
+      value: true
+    evidence_template: "KMS key {resource_id} has a key policy statement granting access to any principal."
+    tags: [kms, exposure, iam]
+    remediation:
+      summary: "Remove the wildcard-principal statement from the key policy."
+      why_it_matters: "Any AWS principal (or, without a Condition, potentially anyone) currently has the cryptographic access this statement grants."
+      how_to_fix: "Scope the key policy's Principal to specific accounts/roles that genuinely need to use this key."
+
+  - id: kms-key-pending-deletion
+    applies_to_resource_type: kms_key
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: high
+    confidence: high
+    service: kms
+    version: "1.0.0"
+    title: "KMS key is scheduled for deletion"
+    description: "KeyState is PendingDeletion — the key (and, irreversibly, any data only encrypted under it) will be destroyed at the end of its waiting period."
+    rationale: "Key deletion is one of the few genuinely irreversible operations in AWS; a key scheduled for deletion that's still in use anywhere is a pending data-loss incident."
+    condition:
+      field: key_state
+      operator: equals
+      value: PendingDeletion
+    evidence_template: "KMS key {resource_id} is scheduled for deletion (state: {key_state})."
+    tags: [kms, availability]
+    remediation:
+      summary: "Confirm nothing still depends on this key, or cancel the deletion."
+      why_it_matters: "Once the waiting period elapses, this key and any data that can only be decrypted with it are permanently unrecoverable."
+      how_to_fix: "If the key is still in use, cancel the pending deletion immediately; if genuinely unused, verify no data was ever encrypted solely under it before letting deletion proceed."
+      automation_example: "aws kms cancel-key-deletion --key-id <key-id>"
+
+  - id: kms-key-not-customer-managed
+    applies_to_resource_type: kms_key
+    framework: iso_27001
+    control_id: A.8.24
+    domain: encryption
+    severity: low
+    confidence: low
+    service: kms
+    version: "1.0.0"
+    title: "Encryption relies on an AWS-managed key rather than a customer-managed key"
+    description: >
+      KeyManager is "AWS" rather than "CUSTOMER" — AWS-managed keys
+      cannot have a custom key policy, cannot be rotated on a custom
+      schedule, and cannot be restricted to specific principals beyond
+      the owning service.
+    rationale: "This is an informational/hygiene signal (LOW confidence, LOW severity) rather than a hard finding: AWS-managed keys are a legitimate, secure default for many workloads. It exists to help an account owner see, at a glance, where a customer-managed key would give more control."
+    condition:
+      field: key_manager
+      operator: equals
+      value: AWS
+    evidence_template: "KMS key {resource_id} is an AWS-managed key rather than a customer-managed key."
+    tags: [kms, hygiene]
+    remediation:
+      summary: "Consider a customer-managed key if this workload needs custom key policy, rotation schedule, or cross-account access control."
+      why_it_matters: "AWS-managed keys work correctly but offer no customization of policy, rotation, or grants — this is informational, not a defect."
+      how_to_fix: "If more control is needed, create a customer-managed key and update the consuming service to use it; otherwise no action is required."

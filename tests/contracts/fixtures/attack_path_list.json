@@ -1,0 +1,215 @@
+{
+  "summary": {
+    "critical": 1,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "total": 2
+  },
+  "items": [
+    {
+      "id": "acme:internet_to_workload_to_identity_to_data:sg-1:bucket-1",
+      "tenant_id": "acme",
+      "scan_key": "acme|aws|111111111111|-|2026-06-01T12:00:00+00:00",
+      "scenario": "internet_to_workload_to_identity_to_data",
+      "provider": "aws",
+      "severity": "critical",
+      "risk_score": 92.5,
+      "confidence": "high",
+      "source": "sg-1",
+      "target": "bucket-1",
+      "nodes": [
+        {
+          "resource_id": "sg-1",
+          "resource_type": "security_group",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "i-web",
+          "resource_type": "ec2_instance",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "arn:aws:iam::111111111111:role/bucket-1-reader",
+          "resource_type": "iam_role",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": null,
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "bucket-1",
+          "resource_type": "s3_bucket",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        }
+      ],
+      "edges": [
+        {
+          "source": "sg-1",
+          "target": "i-web",
+          "relationship": "attached_to",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "has_unrestricted_ingress": true
+          }
+        },
+        {
+          "source": "i-web",
+          "target": "arn:aws:iam::111111111111:role/bucket-1-reader",
+          "relationship": "assumes",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "instance_profile_arn": "arn:aws:iam::111111111111:instance-profile/app"
+          }
+        },
+        {
+          "source": "arn:aws:iam::111111111111:role/bucket-1-reader",
+          "target": "bucket-1",
+          "relationship": "accesses",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "evidence_level": "exact",
+            "matched_pattern": "arn:aws:s3:::bucket-1"
+          }
+        }
+      ],
+      "evidence": {
+        "chain": "sg-1 -> i-web -> arn:aws:iam::111111111111:role/bucket-1-reader -> bucket-1",
+        "relationships": [
+          "assumes",
+          "accesses"
+        ],
+        "target_role": "storage",
+        "score_factors": {
+          "exposure": 30.0,
+          "privilege": 25.0,
+          "sensitivity": 25.0
+        },
+        "scoring_model": "v1"
+      },
+      "contributing_finding_ids": [],
+      "algorithm_version": "v1",
+      "scoring_model_version": "v1",
+      "fingerprint": "fp-acme-sg-1-bucket-1",
+      "created_at": "2026-06-01T12:00:00Z"
+    },
+    {
+      "id": "acme:internet_to_exposed_workload:sg-3:i-web",
+      "tenant_id": "acme",
+      "scan_key": "acme|aws|111111111111|-|2026-06-01T12:00:00+00:00",
+      "scenario": "internet_to_exposed_workload",
+      "provider": "aws",
+      "severity": "high",
+      "risk_score": 50.0,
+      "confidence": "high",
+      "source": "sg-3",
+      "target": "i-web",
+      "nodes": [
+        {
+          "resource_id": "sg-3",
+          "resource_type": "security_group",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "i-web",
+          "resource_type": "ec2_instance",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "arn:aws:iam::111111111111:role/i-web-reader",
+          "resource_type": "iam_role",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": null,
+          "confidence": "high",
+          "kind": "collected"
+        },
+        {
+          "resource_id": "i-web",
+          "resource_type": "s3_bucket",
+          "provider": "aws",
+          "account_id": "111111111111",
+          "region": "us-east-1",
+          "confidence": "high",
+          "kind": "collected"
+        }
+      ],
+      "edges": [
+        {
+          "source": "sg-3",
+          "target": "i-web",
+          "relationship": "attached_to",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "has_unrestricted_ingress": true
+          }
+        },
+        {
+          "source": "i-web",
+          "target": "arn:aws:iam::111111111111:role/i-web-reader",
+          "relationship": "assumes",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "instance_profile_arn": "arn:aws:iam::111111111111:instance-profile/app"
+          }
+        },
+        {
+          "source": "arn:aws:iam::111111111111:role/i-web-reader",
+          "target": "i-web",
+          "relationship": "accesses",
+          "blocked": false,
+          "confidence": "high",
+          "evidence": {
+            "evidence_level": "exact",
+            "matched_pattern": "arn:aws:s3:::i-web"
+          }
+        }
+      ],
+      "evidence": {
+        "chain": "sg-3 -> i-web -> arn:aws:iam::111111111111:role/i-web-reader -> i-web",
+        "relationships": [
+          "assumes",
+          "accesses"
+        ],
+        "target_role": "storage",
+        "score_factors": {
+          "exposure": 30.0,
+          "privilege": 25.0,
+          "sensitivity": 25.0
+        },
+        "scoring_model": "v1"
+      },
+      "contributing_finding_ids": [],
+      "algorithm_version": "v1",
+      "scoring_model_version": "v1",
+      "fingerprint": "fp-acme-sg-3-i-web",
+      "created_at": "2026-06-01T12:00:00Z"
+    }
+  ]
+}

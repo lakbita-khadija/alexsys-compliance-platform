@@ -1,0 +1,162 @@
+# EC2 conformance scenarios (Phase 3B, Part L).
+#
+# Includes the ATTACHED_TO cross-resource case (ec2_instance ->
+# security_group) with both a failing and a passing neighbor, so the
+# relationship rule is proven to inspect the neighbor's actual state.
+scenarios:
+  - scenario_id: ec2-hardened-instance
+    description: >
+      A hardened instance: no public IP, IMDSv2 required, encrypted
+      root volume, instance profile attached. Every EC2 rule PASSes.
+    resource:
+      resource_id: i-conformance-hardened
+      resource_type: ec2_instance
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        state: running
+        vpc_id: vpc-1
+        subnet_id: subnet-1
+        public_ip: null
+        instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/app"
+        imds_v2_required: true
+        root_volume_encrypted: true
+    expected_findings:
+      - rule_id: ec2-instance-public-ip-assigned
+        status: pass
+      - rule_id: ec2-instance-no-iam-instance-profile
+        status: pass
+      - rule_id: ec2-instance-imds-v1-allowed
+        status: pass
+      - rule_id: ec2-instance-root-volume-not-encrypted
+        status: pass
+      - rule_id: ec2-instance-attached-to-open-security-group
+        status: pass
+    tags: [ec2, compliant]
+
+  - scenario_id: ec2-soft-instance
+    description: >
+      An instance that is soft on every axis the catalog checks:
+      public IP, no instance profile, IMDSv1 allowed, unencrypted root
+      volume.
+    resource:
+      resource_id: i-conformance-soft
+      resource_type: ec2_instance
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        state: running
+        vpc_id: vpc-1
+        subnet_id: subnet-1
+        public_ip: "203.0.113.10"
+        instance_profile_arn: null
+        imds_v2_required: false
+        root_volume_encrypted: false
+    expected_findings:
+      - rule_id: ec2-instance-public-ip-assigned
+        status: fail
+        severity: medium
+        evidence_contains: ["i-conformance-soft", "203.0.113.10"]
+      - rule_id: ec2-instance-no-iam-instance-profile
+        status: fail
+        severity: low
+      - rule_id: ec2-instance-imds-v1-allowed
+        status: fail
+        severity: medium
+      - rule_id: ec2-instance-root-volume-not-encrypted
+        status: fail
+        severity: high
+    tags: [ec2, non_compliant]
+
+  - scenario_id: ec2-instance-store-backed
+    description: >
+      EDGE CASE for the "absent vs collected-null" distinction: an
+      instance-store-backed instance has no EBS root volume, so
+      `root_volume_encrypted` is collected as null. The rule compares
+      `null == false` -> not equal -> PASS. It must NOT report an
+      unencrypted volume for a machine that has no EBS volume at all.
+    resource:
+      resource_id: i-conformance-instance-store
+      resource_type: ec2_instance
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        state: running
+        vpc_id: vpc-1
+        subnet_id: subnet-1
+        public_ip: null
+        instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/app"
+        imds_v2_required: true
+        root_volume_encrypted: null
+    expected_findings:
+      - rule_id: ec2-instance-root-volume-not-encrypted
+        status: pass
+    tags: [ec2, edge_case, three_valued_logic]
+
+  - scenario_id: ec2-attached-to-open-security-group
+    description: >
+      CROSS-RESOURCE: a fully hardened instance whose only weakness is
+      the security group it is attached to. Every single-resource rule
+      PASSes; only the relationship rule fires.
+    resource:
+      resource_id: i-conformance-open-sg
+      resource_type: ec2_instance
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        state: running
+        vpc_id: vpc-1
+        subnet_id: subnet-1
+        public_ip: null
+        instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/app"
+        imds_v2_required: true
+        root_volume_encrypted: true
+    relationships:
+      - type: attached_to
+        direction: outgoing
+        target:
+          resource_id: sg-conformance-open-for-ec2
+          resource_type: security_group
+          attributes:
+            has_unrestricted_ingress: true
+            unrestricted_ingress_ports: [22]
+    expected_findings:
+      - rule_id: ec2-instance-public-ip-assigned
+        status: pass
+      - rule_id: ec2-instance-imds-v1-allowed
+        status: pass
+      - rule_id: ec2-instance-attached-to-open-security-group
+        status: fail
+        severity: high
+    tags: [ec2, network, relationship, non_compliant]
+
+  - scenario_id: ec2-attached-to-restrictive-security-group
+    description: >
+      CROSS-RESOURCE NEGATIVE CONTROL: same shape, restrictive
+      neighbor. The relationship rule must PASS.
+    resource:
+      resource_id: i-conformance-closed-sg
+      resource_type: ec2_instance
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        state: running
+        vpc_id: vpc-1
+        subnet_id: subnet-1
+        public_ip: null
+        instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/app"
+        imds_v2_required: true
+        root_volume_encrypted: true
+    relationships:
+      - type: attached_to
+        direction: outgoing
+        target:
+          resource_id: sg-conformance-closed-for-ec2
+          resource_type: security_group
+          attributes:
+            has_unrestricted_ingress: false
+            unrestricted_ingress_ports: []
+    expected_findings:
+      - rule_id: ec2-instance-attached-to-open-security-group
+        status: pass
+    tags: [ec2, network, relationship, compliant]

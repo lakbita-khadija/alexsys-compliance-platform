@@ -1,0 +1,52 @@
+{
+  "id": "acme:111111111111:bucket-1:s3-bucket-public:2026-06-01T12:00:00+00:00",
+  "tenant_id": "acme",
+  "resource_id": "bucket-1",
+  "rule_id": "s3-bucket-public",
+  "framework": "iso_27001",
+  "control_id": "A.8.24",
+  "domain": "storage",
+  "status": "fail",
+  "severity": "critical",
+  "evidence": {
+    "public": true
+  },
+  "detected_at": "2026-06-01T12:00:00Z",
+  "region": "us-east-1",
+  "account_id": "111111111111",
+  "scan_key": "acme|aws|111111111111|-|2026-06-01T12:00:00+00:00",
+  "logical_finding_id": "acme:111111111111:bucket-1:s3-bucket-public",
+  "risk": null,
+  "confidence": null,
+  "related_attack_path_ids": [
+    "acme:internet_to_workload_to_identity_to_data:sg-1:bucket-1"
+  ],
+  "related_resources": [
+    "i-web",
+    "sg-1"
+  ],
+  "indeterminate_resources": [
+    "kms-key-1"
+  ],
+  "graph_context": {
+    "outgoing": [
+      {
+        "relationship": "accesses",
+        "target": "bucket-1",
+        "target_type": "s3_bucket",
+        "confidence": "high",
+        "evidence": {
+          "evidence_level": "exact"
+        }
+      }
+    ],
+    "incoming": [
+      {
+        "relationship": "attached_to",
+        "source": "sg-1",
+        "source_type": "security_group",
+        "confidence": "high"
+      }
+    ]
+  }
+}

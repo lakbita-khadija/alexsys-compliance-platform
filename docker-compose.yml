@@ -1,0 +1,81 @@
+# Local development stack for ComplianceIQ Core (Phase 5, §32, §33).
+#
+#   cp .env.example .env      # then set JWT_PRIVATE_KEY
+#   docker compose up -d
+#   curl localhost:8000/health
+#
+# Development only. It runs one instance, uses a throwaway database
+# password, and exposes Postgres on loopback for psql access — none of
+# which belongs in production.
+
+name: complianceiq
+
+services:
+  postgres:
+    image: postgres:16.13-alpine
+    environment:
+      POSTGRES_USER: complianceiq
+      POSTGRES_PASSWORD: complianceiq-local-dev
+      POSTGRES_DB: complianceiq
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U complianceiq -d complianceiq -c 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies migrations once, then exits. Separated from the API so that
+  # scaling the API to N replicas does not run N concurrent migrations
+  # against the same database.
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      COMPLIANCEIQ_DB_HOST: postgres
+      COMPLIANCEIQ_DB_USER: complianceiq
+      COMPLIANCEIQ_DB_PASSWORD: complianceiq-local-dev
+      COMPLIANCEIQ_DB_NAME: complianceiq
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  core:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      COMPLIANCEIQ_DB_HOST: postgres
+      COMPLIANCEIQ_DB_USER: complianceiq
+      COMPLIANCEIQ_DB_PASSWORD: complianceiq-local-dev
+      COMPLIANCEIQ_DB_NAME: complianceiq
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?set JWT_PRIVATE_KEY in .env — see .env.example}
+      JWT_ISSUER: complianceiq-core
+      JWT_AUDIENCE: complianceiq
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # The stub the AI engineer develops against (§14): real routing, real
+  # JWT verification, real error envelope, in-memory data. No database,
+  # no cloud credentials, no migrations.
+  #
+  #   CIQ_CORE_API_BASE_URL=http://core-stub:9000
+  core-stub:
+    build: .
+    command:
+      ["uvicorn", "--factory", "composition:build_stub_app",
+       "--host", "0.0.0.0", "--port", "9000"]
+    ports:
+      - "127.0.0.1:9000:9000"
+    profiles: ["stub"]
+
+volumes:
+  postgres-data:

@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": "validation_error",
+    "message": "request validation failed",
+    "correlation_id": "example-correlation-id",
+    "details": {
+      "fields": [
+        {
+          "location": "query.limit",
+          "message": "Input should be less than or equal to 100"
+        }
+      ]
+    }
+  }
+}

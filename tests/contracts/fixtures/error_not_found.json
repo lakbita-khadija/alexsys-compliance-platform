@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "finding not found",
+    "correlation_id": "example-correlation-id",
+    "details": {}
+  }
+}

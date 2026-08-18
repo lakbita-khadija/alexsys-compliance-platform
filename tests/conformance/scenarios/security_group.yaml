@@ -1,0 +1,198 @@
+# Security group conformance scenarios (Phase 3B, Part L).
+#
+# The last two scenarios exercise the CROSS-RESOURCE path: a
+# `relationships:` block builds a real ResourceGraph plus the neighbor
+# resources, so `security-group-allows-another-open-security-group`
+# (a `relationship` DSL node) is evaluated against genuine graph data
+# rather than being skipped.
+scenarios:
+  - scenario_id: sg-restrictive
+    description: >
+      A security group with only internal HTTPS ingress. Every
+      port-specific rule and the catch-all rule should PASS.
+    resource:
+      resource_id: sg-conformance-restrictive
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: false
+        unrestricted_ingress_ports: []
+        ingress_rule_count: 1
+        egress_rule_count: 1
+    expected_findings:
+      - rule_id: security-group-ssh-open-to-world
+        status: pass
+      - rule_id: security-group-rdp-open-to-world
+        status: pass
+      - rule_id: security-group-mysql-open-to-world
+        status: pass
+      - rule_id: security-group-postgres-open-to-world
+        status: pass
+      - rule_id: security-group-ftp-open-to-world
+        status: pass
+      - rule_id: security-group-telnet-open-to-world
+        status: pass
+      - rule_id: security-group-unrestricted-ingress-any-port
+        status: pass
+      - rule_id: security-group-allows-another-open-security-group
+        status: pass
+    tags: [network, compliant]
+
+  - scenario_id: sg-ssh-open-to-world
+    description: >
+      SSH open to 0.0.0.0/0. The SSH rule and the catch-all fire; every
+      OTHER port-specific rule must PASS — proving the port rules are
+      genuinely independent and not a single "any open port" check
+      wearing six names.
+    resource:
+      resource_id: sg-conformance-ssh-open
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: true
+        unrestricted_ingress_ports: [22]
+        ingress_rule_count: 1
+        egress_rule_count: 1
+    expected_findings:
+      - rule_id: security-group-ssh-open-to-world
+        status: fail
+        severity: critical
+        evidence_contains: ["sg-conformance-ssh-open", "port 22"]
+      - rule_id: security-group-rdp-open-to-world
+        status: pass
+      - rule_id: security-group-mysql-open-to-world
+        status: pass
+      - rule_id: security-group-unrestricted-ingress-any-port
+        status: fail
+        severity: high
+    tags: [network, exposure, non_compliant]
+
+  - scenario_id: sg-multiple-sensitive-ports-open
+    description: >
+      Several sensitive ports open at once — each matching rule must
+      fire independently.
+    resource:
+      resource_id: sg-conformance-many-open
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: true
+        unrestricted_ingress_ports: [22, 3389, 3306, 5432, 21, 23]
+        ingress_rule_count: 6
+        egress_rule_count: 1
+    expected_findings:
+      - rule_id: security-group-ssh-open-to-world
+        status: fail
+      - rule_id: security-group-rdp-open-to-world
+        status: fail
+      - rule_id: security-group-mysql-open-to-world
+        status: fail
+      - rule_id: security-group-postgres-open-to-world
+        status: fail
+      - rule_id: security-group-ftp-open-to-world
+        status: fail
+      - rule_id: security-group-telnet-open-to-world
+        status: fail
+      - rule_id: security-group-unrestricted-ingress-any-port
+        status: fail
+    tags: [network, exposure, non_compliant]
+
+  - scenario_id: sg-wide-port-range-open
+    description: >
+      EDGE CASE distinguishing the catch-all rule from the port rules:
+      an "all traffic" rule open to the internet sets
+      `has_unrestricted_ingress` but enumerates NO single ports (see
+      normalizers/security_group.py's documented single-port-only
+      limitation). Only the catch-all should fire.
+    resource:
+      resource_id: sg-conformance-range-open
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: true
+        unrestricted_ingress_ports: []
+        ingress_rule_count: 1
+        egress_rule_count: 1
+    expected_findings:
+      - rule_id: security-group-ssh-open-to-world
+        status: pass
+      - rule_id: security-group-rdp-open-to-world
+        status: pass
+      - rule_id: security-group-unrestricted-ingress-any-port
+        status: fail
+    tags: [network, edge_case]
+
+  - scenario_id: sg-chained-to-open-group
+    description: >
+      CROSS-RESOURCE: this group's own ingress is restrictive, but it
+      ALLOWS another security group that is itself wide open. Only the
+      relationship rule should fire — every single-resource rule sees
+      a perfectly clean group.
+    resource:
+      resource_id: sg-conformance-chained
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: false
+        unrestricted_ingress_ports: []
+        ingress_rule_count: 1
+        egress_rule_count: 1
+    relationships:
+      - type: allows
+        direction: outgoing
+        target:
+          resource_id: sg-conformance-open-neighbor
+          resource_type: security_group
+          attributes:
+            has_unrestricted_ingress: true
+            unrestricted_ingress_ports: [22]
+    expected_findings:
+      - rule_id: security-group-ssh-open-to-world
+        status: pass
+      - rule_id: security-group-unrestricted-ingress-any-port
+        status: pass
+      - rule_id: security-group-allows-another-open-security-group
+        status: fail
+        severity: high
+    tags: [network, relationship, non_compliant]
+
+  - scenario_id: sg-chained-to-closed-group
+    description: >
+      CROSS-RESOURCE NEGATIVE CONTROL: the same chaining shape, but the
+      referenced group is itself restrictive. The relationship rule
+      must PASS — proving it actually inspects the neighbor's state
+      rather than firing on the mere existence of an ALLOWS edge.
+    resource:
+      resource_id: sg-conformance-chained-safe
+      resource_type: security_group
+      tenant_id: conformance-test
+      region: us-east-1
+      attributes:
+        vpc_id: vpc-1
+        has_unrestricted_ingress: false
+        unrestricted_ingress_ports: []
+        ingress_rule_count: 1
+        egress_rule_count: 1
+    relationships:
+      - type: allows
+        direction: outgoing
+        target:
+          resource_id: sg-conformance-closed-neighbor
+          resource_type: security_group
+          attributes:
+            has_unrestricted_ingress: false
+            unrestricted_ingress_ports: []
+    expected_findings:
+      - rule_id: security-group-allows-another-open-security-group
+        status: pass
+    tags: [network, relationship, compliant]

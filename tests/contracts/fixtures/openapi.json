@@ -1,0 +1,3010 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ComplianceIQ Core API",
+    "description": "\nThe authoritative Core Platform & Data Service for ComplianceIQ.\n\n**Core owns the truth.** Findings, resources, scans and compliance scores\nare produced and owned here. The AI Service reasons *over* this data via\nthis API and never becomes its owner; the dashboard presents it and must\nkeep working when the AI Service is unavailable.\n\n### Authentication\nEvery `/api/v1` endpoint requires `Authorization: Bearer <JWT>` (RS256).\nThe **tenant is taken from the verified token** \u2014 there is no `tenant_id`\nparameter anywhere in this API, and one cannot be supplied.\n\n### Correlation\nSend `X-Correlation-ID` and it is preserved and echoed; omit it and one\nis generated. It appears on every response, including errors.\n\n### Errors\nEvery error \u2014 including validation and unexpected failures \u2014 returns the\nsame envelope: `{\"error\": {\"code\", \"message\", \"correlation_id\", \"details\"}}`.\nBranch on `code`; it is stable. `message` is for humans.\n\n### Versioning\nBreaking changes require a new prefix (`/api/v2`). Additive fields may\nappear in `v1` responses, so clients must ignore unknown fields.\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Liveness and dependency health",
+        "description": "Unauthenticated. Returns 200 when the service can serve traffic and 503 when it cannot reach its database. Reports no version or configuration detail.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Service and API version",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/jwks.json": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Public JWT verification keys (JWKS)",
+        "description": "Unauthenticated and intended to be public. Contains only PUBLIC key material (RSA modulus and exponent) \u2014 never a private key.\n\nThe AI Service should fetch and cache this to verify tokens locally rather than calling Core per request.",
+        "operationId": "jwks__well_known_jwks_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Jwks  Well Known Jwks Json Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/findings": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "List findings",
+        "description": "One page of findings for the **authenticated tenant**.\n\nThe tenant is taken from the verified JWT. There is no `tenant_id` parameter, and supplying one has no effect on scoping.\n\n`status=indeterminate` findings are returned like any other and must not be treated as passes \u2014 they mean the check could not be evaluated.",
+        "operationId": "list_findings_api_v1_findings_get",
+        "parameters": [
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Framework id, e.g. iso_27001.",
+              "title": "Framework"
+            },
+            "description": "Framework id, e.g. iso_27001."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Severity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "critical | high | medium | low",
+              "title": "Severity"
+            },
+            "description": "critical | high | medium | low"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FindingStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "fail | pass | indeterminate. 'indeterminate' is NOT a pass.",
+              "title": "Status"
+            },
+            "description": "fail | pass | indeterminate. 'indeterminate' is NOT a pass."
+          },
+          {
+            "name": "lifecycle_state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LifecycleState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "open | resolved | reopened | suppressed",
+              "title": "Lifecycle State"
+            },
+            "description": "open | resolved | reopened | suppressed"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Risk domain, e.g. storage.",
+              "title": "Domain"
+            },
+            "description": "Risk domain, e.g. storage."
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CloudProvider"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "aws | azure",
+              "title": "Provider"
+            },
+            "description": "aws | azure"
+          },
+          {
+            "name": "resource_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          },
+          {
+            "name": "scan_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to one scan.",
+              "title": "Scan Key"
+            },
+            "description": "Restrict to one scan."
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "detected_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detected After"
+            }
+          },
+          {
+            "name": "detected_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detected Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Page size. Default 50, maximum 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size. Default 50, maximum 100."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Zero-based offset.",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Zero-based offset."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "description": "Deterministic orderings only; each has a unique tiebreaker.",
+              "default": "detected_at_desc"
+            },
+            "description": "Deterministic orderings only; each has a unique tiebreaker."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponse_FindingResource_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter, enum value, or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/findings/ai-contract": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "List findings in the frozen AI contract shape",
+        "description": "Identical filtering and pagination to `GET /findings`, but each item is the exact 11-field payload `contracts/ai_service` specifies.\n\n**INDETERMINATE findings are omitted** \u2014 that contract's status enum has only `pass` and `fail`, and coercing an unevaluated check into either would be inventing a verdict. `total` still reflects the unfiltered match count, so `len(items)` may be smaller than the page size. Use `GET /findings` if you need to see indeterminate results.",
+        "operationId": "list_findings_ai_contract_api_v1_findings_ai_contract_get",
+        "parameters": [
+          {
+            "name": "framework",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Framework id, e.g. iso_27001.",
+              "title": "Framework"
+            },
+            "description": "Framework id, e.g. iso_27001."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Severity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "critical | high | medium | low",
+              "title": "Severity"
+            },
+            "description": "critical | high | medium | low"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FindingStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "fail | pass | indeterminate. 'indeterminate' is NOT a pass.",
+              "title": "Status"
+            },
+            "description": "fail | pass | indeterminate. 'indeterminate' is NOT a pass."
+          },
+          {
+            "name": "lifecycle_state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LifecycleState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "open | resolved | reopened | suppressed",
+              "title": "Lifecycle State"
+            },
+            "description": "open | resolved | reopened | suppressed"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Risk domain, e.g. storage.",
+              "title": "Domain"
+            },
+            "description": "Risk domain, e.g. storage."
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CloudProvider"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "aws | azure",
+              "title": "Provider"
+            },
+            "description": "aws | azure"
+          },
+          {
+            "name": "resource_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          },
+          {
+            "name": "scan_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to one scan.",
+              "title": "Scan Key"
+            },
+            "description": "Restrict to one scan."
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "detected_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detected After"
+            }
+          },
+          {
+            "name": "detected_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detected Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Page size. Default 50, maximum 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size. Default 50, maximum 100."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Zero-based offset.",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Zero-based offset."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "description": "Deterministic orderings only; each has a unique tiebreaker.",
+              "default": "detected_at_desc"
+            },
+            "description": "Deterministic orderings only; each has a unique tiebreaker."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponse_AiFindingContract_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter, enum value, or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/findings/{finding_id}": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "Get one finding",
+        "description": "One finding with its full graph context.\n\nUnlike the list endpoint this includes `graph_context` \u2014 the resource's neighbourhood at scan time. A resource's edge count is unbounded, so it is returned here and not in pages.\n\n`related_attack_path_ids` names the attack paths this resource lies on; resolve them through `/api/v1/attack-paths/{id}`.",
+        "operationId": "get_finding_api_v1_findings__finding_id__get",
+        "parameters": [
+          {
+            "name": "finding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Physical finding id (per-scan).",
+              "title": "Finding Id"
+            },
+            "description": "Physical finding id (per-scan)."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter, enum value, or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such finding **in this tenant**. Returned identically whether the finding does not exist or belongs to another tenant, so the response cannot be used to probe for other tenants' data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/findings/{finding_id}/ai-contract": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "Get one finding in the frozen AI contract shape",
+        "description": "The exact 11-field payload `contracts/ai_service` specifies. Provided so the AI Service can consume a byte-stable shape independent of additive changes to the richer API schema.",
+        "operationId": "get_finding_ai_contract_api_v1_findings__finding_id__ai_contract_get",
+        "parameters": [
+          {
+            "name": "finding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Finding Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiFindingContract"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter, enum value, or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such finding in this tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The finding cannot be represented in the AI contract \u2014 it is INDETERMINATE, or its framework/domain is outside the contract's closed vocabulary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scores": {
+      "get": {
+        "tags": [
+          "scores"
+        ],
+        "summary": "List compliance scores",
+        "description": "One page of scores for the authenticated tenant, newest first.\n\n**`score` may be `null`.** That means nothing determinate was evaluated in that scope. Render it as 'no data' \u2014 coercing it to 0 or 100 states something false about the tenant's posture.\n\nPair it with `coverage`: a 100% score computed over 4 of 900 checks is an absent posture, not a good one.",
+        "operationId": "list_scores_api_v1_scores_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ScoreScope"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "tenant | framework | domain | scan",
+              "title": "Scope"
+            },
+            "description": "tenant | framework | domain | scan"
+          },
+          {
+            "name": "scope_value",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The framework id / domain name / scan key. Requires scope.",
+              "title": "Scope Value"
+            },
+            "description": "The framework id / domain name / scan key. Requires scope."
+          },
+          {
+            "name": "scan_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scan Key"
+            }
+          },
+          {
+            "name": "computed_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Computed After"
+            }
+          },
+          {
+            "name": "computed_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Computed Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Page size. Default 50, maximum 100.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size. Default 50, maximum 100."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Zero-based offset.",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Zero-based offset."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponse_ComplianceScoreResource_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scores/current": {
+      "get": {
+        "tags": [
+          "scores"
+        ],
+        "summary": "Get the current score for one scope",
+        "description": "The dashboard's headline number. Defaults to the whole-tenant score.",
+        "operationId": "current_score_api_v1_scores_current_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ScoreScope",
+              "default": "tenant"
+            }
+          },
+          {
+            "name": "scope_value",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Framework id / domain name / scan key. Omit for scope=tenant.",
+              "title": "Scope Value"
+            },
+            "description": "Framework id / domain name / scan key. Omit for scope=tenant."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceScoreResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter or pagination bound.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No score has been computed for this scope yet (no scan has completed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Trigger a compliance scan",
+        "description": "**Asynchronous.** Returns `202 Accepted` with a `scan_key` and `status: queued`.\n\nThe scan has NOT run when this returns. Poll `GET /api/v1/scans/{scan_key}` until `status` is terminal (`completed`, `partial`, `failed`, `cancelled`).\n\n`partial` means the scan ran but could not enumerate everything \u2014 check `errors`. It is **not** a success: an unreachable service was not verified.",
+        "operationId": "submit_scan_api_v1_scans_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanSubmissionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Lacking the 'scanner' role. Triggering a scan is separated from reading data because it spends money and calls real cloud APIs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body or parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A scan for this exact target is already queued or running. Scan keys are deterministic, so a duplicate submission is detected rather than starting a second concurrent scan of the same account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "List recent scans",
+        "operationId": "list_scans_api_v1_scans_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanResource"
+                  },
+                  "title": "Response List Scans Api V1 Scans Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Lacking the required role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body or parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans/{scan_key}": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get scan status and results summary",
+        "operationId": "get_scan_api_v1_scans__scan_key__get",
+        "parameters": [
+          {
+            "name": "scan_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Deterministic scan key from the submission response.",
+              "title": "Scan Key"
+            },
+            "description": "Deterministic scan key from the submission response."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Lacking the required role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body or parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scan in this tenant. Identical response whether the scan does not exist or belongs to another tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans/{scan_id}/attack-paths": {
+      "get": {
+        "tags": [
+          "attack-paths"
+        ],
+        "summary": "Attack paths discovered by one scan",
+        "description": "Every attack path from one scan, **highest risk first**, with a severity summary alongside.\n\nThe tenant comes from the verified JWT; there is no `tenant_id` parameter. A scan belonging to another tenant returns an empty list rather than an error, for the same reason the single-path endpoint returns 404.\n\nEach path carries its full ordered chain and its `evidence.score_factors` breakdown \u2014 the score is only useful if it can be defended.",
+        "operationId": "list_attack_paths_for_scan_api_v1_scans__scan_id__attack_paths_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 512,
+              "description": "The scan key.",
+              "title": "Scan Id"
+            },
+            "description": "The scan key."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(critical|high|medium|low)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only paths at this severity.",
+              "title": "Severity"
+            },
+            "description": "Only paths at this severity."
+          },
+          {
+            "name": "scenario",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only paths from this analyzer scenario.",
+              "title": "Scenario"
+            },
+            "description": "Only paths from this analyzer scenario."
+          },
+          {
+            "name": "min_confidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(unknown|low|medium|high)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only paths at or above this confidence. `medium` excludes the low-confidence paths a conditioned IAM grant produces.",
+              "title": "Min Confidence"
+            },
+            "description": "Only paths at or above this confidence. `medium` excludes the low-confidence paths a conditioned IAM grant produces."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttackPathListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter or enum value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/attack-paths/{attack_path_id}": {
+      "get": {
+        "tags": [
+          "attack-paths"
+        ],
+        "summary": "One attack path",
+        "description": "The complete chain, its evidence and its scoring breakdown.\n\n`nodes` and `edges` are **ordered** \u2014 a path whose hops reorder is a different path.\n\n`contributing_finding_ids` links back to the findings on resources along the chain, so a responder can pivot between the composite risk and the individual misconfigurations that create it.",
+        "operationId": "get_attack_path_api_v1_attack_paths__attack_path_id__get",
+        "parameters": [
+          {
+            "name": "attack_path_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "The attack path id.",
+              "title": "Attack Path Id"
+            },
+            "description": "The attack path id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttackPathResource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired or badly signed token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but lacking the 'reader' role.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter or enum value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such attack path **in this tenant**. Returned identically whether the path does not exist or belongs to another tenant, so the response cannot be used to probe for other tenants' data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AiFindingContract": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "resource_id": {
+            "type": "string",
+            "title": "Resource Id"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "framework": {
+            "type": "string",
+            "title": "Framework"
+          },
+          "control_id": {
+            "type": "string",
+            "title": "Control Id"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail"
+            ],
+            "title": "Status",
+            "description": "Two-valued. INDETERMINATE findings cannot cross this boundary and are omitted."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Severity"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence"
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "resource_id",
+          "rule_id",
+          "framework",
+          "control_id",
+          "domain",
+          "status",
+          "severity",
+          "evidence",
+          "detected_at"
+        ],
+        "title": "AiFindingContract",
+        "description": "The frozen 11-field AI Service contract, on the wire.\n\nMirrors ``contracts.ai_service.FindingContract`` exactly \u2014 same\nfields, same names, same order. It exists as a Pydantic model only so\nit appears in OpenAPI and the AI engineer can generate a client from\nthe published spec; the VALUES always come from the existing\n``finding_to_contract`` ACL, never from an independent projection\nwritten here."
+      },
+      "AttackPathEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "relationship": {
+            "type": "string",
+            "title": "Relationship"
+          },
+          "blocked": {
+            "type": "boolean",
+            "title": "Blocked",
+            "default": false
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence",
+            "default": {}
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "target",
+          "relationship",
+          "confidence"
+        ],
+        "title": "AttackPathEdge",
+        "description": "One relationship traversed."
+      },
+      "AttackPathListResponse": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/AttackPathSummary"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttackPathResource"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "title": "AttackPathListResponse",
+        "description": "Paths plus their severity summary, in one round trip.\n\nThe dashboard needs both to render its landing screen, and two\nendpoints would guarantee they eventually disagree."
+      },
+      "AttackPathNode": {
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "title": "Resource Id"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resource_id",
+          "resource_type",
+          "confidence",
+          "kind"
+        ],
+        "title": "AttackPathNode",
+        "description": "One hop in an attack path."
+      },
+      "AttackPathResource": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "scan_key": {
+            "type": "string",
+            "title": "Scan Key"
+          },
+          "scenario": {
+            "type": "string",
+            "title": "Scenario"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "risk_score": {
+            "type": "number",
+            "title": "Risk Score"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/AttackPathNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "default": []
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/AttackPathEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "default": []
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence",
+            "default": {}
+          },
+          "contributing_finding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Contributing Finding Ids",
+            "default": []
+          },
+          "algorithm_version": {
+            "type": "string",
+            "title": "Algorithm Version"
+          },
+          "scoring_model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoring Model Version"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "scan_key",
+          "scenario",
+          "severity",
+          "risk_score",
+          "confidence",
+          "source",
+          "target",
+          "algorithm_version",
+          "fingerprint",
+          "created_at"
+        ],
+        "title": "AttackPathResource",
+        "description": "An attack path as the API exposes it (STEP 5).\n\nCarries the full chain and its scoring breakdown, because the number\nis only useful if it can be defended. ``evidence.score_factors``\nnames every contribution and penalty that produced ``risk_score``.\n\n``nodes`` and ``edges`` are ORDERED \u2014 a path whose hops reorder is a\ndifferent path, and the UI renders them as a sequence."
+      },
+      "AttackPathSummary": {
+        "properties": {
+          "critical": {
+            "type": "integer",
+            "title": "Critical",
+            "default": 0
+          },
+          "high": {
+            "type": "integer",
+            "title": "High",
+            "default": 0
+          },
+          "medium": {
+            "type": "integer",
+            "title": "Medium",
+            "default": 0
+          },
+          "low": {
+            "type": "integer",
+            "title": "Low",
+            "default": 0
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AttackPathSummary",
+        "description": "Counts by severity \u2014 the dashboard's landing view (\u00a720)."
+      },
+      "CloudProvider": {
+        "type": "string",
+        "enum": [
+          "aws",
+          "azure"
+        ],
+        "title": "CloudProvider",
+        "description": "Cloud providers the platform can normalize resources from.\n\nAWS is CURRENT (collectors exist per the blueprint's target\narchitecture); AZURE is DESIGNED \u2014 no collector exists yet, but the\nDomain must already be able to represent an Azure-sourced resource\nwithout a rewrite (blueprint \u00a77, ADR-002)."
+      },
+      "ComplianceScoreResource": {
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "framework",
+              "domain",
+              "scan"
+            ],
+            "title": "Scope"
+          },
+          "scope_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Value"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score",
+            "description": "Percent of DETERMINATE checks passed, or null."
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage",
+            "description": "Percent of checks that could be determined, or null."
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ScoreCountsResource"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "scan_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tenant_id",
+          "scope",
+          "scope_value",
+          "score",
+          "coverage",
+          "counts",
+          "computed_at"
+        ],
+        "title": "ComplianceScoreResource",
+        "description": "A compliance score.\n\n``score`` is nullable and that is load-bearing: ``null`` means\nnothing determinate was evaluated. Clients must render it as \"no\ndata\", never coerce it to 0 or 100 \u2014 both are false statements about\nthe tenant's posture.\n\n``coverage`` is the honesty companion: a 100% score over 4 of 900\nchecks is not a good posture, and only ``coverage`` reveals that."
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Stable machine-readable error code. Branch on this."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation. May be reworded; do not parse."
+          },
+          "correlation_id": {
+            "type": "string",
+            "title": "Correlation Id",
+            "description": "Echoes X-Correlation-ID; quote it in bug reports."
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "correlation_id"
+        ],
+        "title": "ErrorDetail"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope",
+        "description": "The response body of EVERY error this API returns."
+      },
+      "FindingResource": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "resource_id": {
+            "type": "string",
+            "title": "Resource Id"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "framework": {
+            "type": "string",
+            "title": "Framework"
+          },
+          "control_id": {
+            "type": "string",
+            "title": "Control Id"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fail",
+              "pass",
+              "indeterminate"
+            ],
+            "title": "Status",
+            "description": "Three-valued, deliberately. 'indeterminate' means the check could not be evaluated from the data collected \u2014 it is NOT a pass. Clients must not treat it as one; that is the hidden-compliance failure the rule engine exists to prevent."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Severity"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence",
+            "description": "Collected facts backing the finding. Secret-shaped keys are redacted."
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "scan_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Key"
+          },
+          "logical_finding_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logical Finding Id",
+            "description": "Stable identity of this issue ACROSS scans. Use it for history, not `id`."
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "related_attack_path_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related Attack Path Ids",
+            "description": "Attack paths this finding's resource lies **on** \u2014 referenced by id, never embedded, because a path carries its whole node and edge list and copying that into every finding would duplicate the graph per row. Fetch details from `/api/v1/attack-paths/{id}`.\n\n**Not the inverse of a path's `contributing_finding_ids`.** This field answers *is my resource on a path* and is status-agnostic; that one answers *which misconfigurations create this risk* and lists failures only. A passing finding on a path resource appears here and not there, by design \u2014 so do not round-trip between the two and expect a fixed point.",
+            "default": []
+          },
+          "related_resources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related Resources",
+            "description": "Neighbouring resources whose state is part of why the rule reached this conclusion. Populated only for rules that actually traversed the graph.",
+            "default": []
+          },
+          "indeterminate_resources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Indeterminate Resources",
+            "description": "Neighbours whose contribution could **not** be determined. Kept separate from `related_resources` so a data gap is never read back as a confirmed relationship \u2014 the same reason `status` is three-valued.",
+            "default": []
+          },
+          "graph_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Context",
+            "description": "The resource's neighbourhood at scan time: incoming and outgoing edges with their relationship type, confidence and evidence.\n\n**Returned by the single-finding endpoint only.** A resource's edge count is unbounded \u2014 one security group can front hundreds of instances \u2014 so including it in a 100-item page would make the list response size depend on graph shape. `null` in a list response means *not requested*, never *no context*."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "resource_id",
+          "rule_id",
+          "framework",
+          "control_id",
+          "domain",
+          "status",
+          "severity",
+          "evidence",
+          "detected_at"
+        ],
+        "title": "FindingResource",
+        "description": "A finding as the API exposes it.\n\nField ownership, per \u00a77's requirement to justify each one:\n\n| field | owner | stable | AI | dashboard | persisted | sensitive |\n|---|---|---|---|---|---|---|\n| id | Core | yes | yes | yes | yes | no |\n| tenant_id | Core (JWT) | yes | yes | yes | yes | no |\n| resource_id | Core | yes | yes | yes | yes | no |\n| rule_id | Core | yes | yes | yes | yes | no |\n| framework, control_id, domain | Rule catalog | yes | yes | yes | yes | no |\n| status | Rule engine | yes | 2-valued only | yes | yes | no |\n| severity | Rule catalog | yes | yes | yes | yes | no |\n| evidence | Rule engine | yes | yes | yes | yes | **redacted** |\n| detected_at | Rule engine | yes | yes | yes | yes | no |\n| region, account_id, scan_key | Collector/scan | yes | no | yes | yes | no |\n| logical_finding_id | Core | yes | no | yes | yes | no |\n| risk, confidence | Core (Phase 3) | yes | no | yes | yes | no |\n| related_attack_path_ids | Core (STEP 4) | yes | yes | yes | yes | no |\n| related_resources, indeterminate_resources | Rule engine | yes | yes | yes | yes | no |\n| graph_context | Rule engine | yes | yes | yes | yes | **redacted** |\n\n``evidence`` is passed through Phase 4's redaction on the way into\nthe database, so what is returned here is already sanitized.\n``graph_context`` carries edge evidence and is redacted on the same\npath, for the same reason."
+      },
+      "FindingStatus": {
+        "type": "string",
+        "enum": [
+          "fail",
+          "pass",
+          "indeterminate"
+        ],
+        "title": "FindingStatus",
+        "description": "Mirrors the three-valued outcome a rule evaluation produces\n(:class:`domain.rules.conditions.EvaluationResult`) at the Finding\nlevel: a violation (``FAIL``), a pass (``PASS``), or a result that\ncould not be determined from the data collected (``INDETERMINATE``)."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status"
+          },
+          "database": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Database"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "database"
+        ],
+        "title": "HealthResponse"
+      },
+      "LifecycleState": {
+        "type": "string",
+        "enum": [
+          "open",
+          "resolved",
+          "reopened",
+          "suppressed"
+        ],
+        "title": "LifecycleState",
+        "description": "Where a logical finding stands right now.\n\n``REOPENED`` is deliberately distinct from ``OPEN``. Both mean \"the\nissue is live\", but a reopened finding is a *regression* \u2014 something\nthat was fixed and broke again \u2014 which is a materially different\nsignal for a security team than a problem that was never fixed. It\nusually indicates a process failure (drift, an unreviewed rollback,\nIaC not matching reality) rather than an unstarted task."
+      },
+      "PageResponse_AiFindingContract_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AiFindingContract"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "PageResponse[AiFindingContract]"
+      },
+      "PageResponse_ComplianceScoreResource_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ComplianceScoreResource"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "PageResponse[ComplianceScoreResource]"
+      },
+      "PageResponse_FindingResource_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FindingResource"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "PageResponse[FindingResource]"
+      },
+      "ScanErrorResource": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "operation": {
+            "type": "string",
+            "title": "Operation"
+          },
+          "error_code": {
+            "type": "string",
+            "title": "Error Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "service",
+          "operation",
+          "error_code",
+          "message",
+          "retryable",
+          "occurred_at"
+        ],
+        "title": "ScanErrorResource"
+      },
+      "ScanRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "aws",
+              "azure"
+            ],
+            "title": "Provider",
+            "description": "Cloud provider to scan. GCP is not implemented; see docs/architecture/phase-5-audit.md."
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id",
+            "description": "AWS account id or Azure subscription id."
+          },
+          "directory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directory Id",
+            "description": "Azure tenant (directory) id, where applicable."
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Regions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "ScanRequest",
+        "description": "``POST /api/v1/scans`` body.\n\nNo ``tenant_id``: it comes from the verified token. Accepting one\nhere would create exactly the \"trust the client's tenant\" hole \u00a712\nforbids, and ``extra=\"forbid\"`` means sending one is a 422 rather\nthan a silently ignored field."
+      },
+      "ScanResource": {
+        "properties": {
+          "scan_key": {
+            "type": "string",
+            "title": "Scan Key"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "directory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directory Id"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Regions"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "resource_count": {
+            "type": "integer",
+            "title": "Resource Count"
+          },
+          "finding_count": {
+            "type": "integer",
+            "title": "Finding Count"
+          },
+          "pass_count": {
+            "type": "integer",
+            "title": "Pass Count"
+          },
+          "fail_count": {
+            "type": "integer",
+            "title": "Fail Count"
+          },
+          "indeterminate_count": {
+            "type": "integer",
+            "title": "Indeterminate Count"
+          },
+          "critical_count": {
+            "type": "integer",
+            "title": "Critical Count"
+          },
+          "high_count": {
+            "type": "integer",
+            "title": "High Count"
+          },
+          "medium_count": {
+            "type": "integer",
+            "title": "Medium Count"
+          },
+          "low_count": {
+            "type": "integer",
+            "title": "Low Count"
+          },
+          "error_count": {
+            "type": "integer",
+            "title": "Error Count"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ScanErrorResource"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scan_key",
+          "tenant_id",
+          "provider",
+          "account_id",
+          "directory_id",
+          "regions",
+          "status",
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "resource_count",
+          "finding_count",
+          "pass_count",
+          "fail_count",
+          "indeterminate_count",
+          "critical_count",
+          "high_count",
+          "medium_count",
+          "low_count",
+          "error_count"
+        ],
+        "title": "ScanResource",
+        "description": "A scan's full state.\n\n``partial`` is a first-class status, not a variant of ``completed``:\na scan that enumerated S3 but was denied KMS has NOT verified KMS,\nand reporting it as completed would tell an auditor that KMS was\nchecked and found compliant. Consult ``errors`` whenever status is\n``partial``."
+      },
+      "ScanSubmissionResponse": {
+        "properties": {
+          "scan_key": {
+            "type": "string",
+            "title": "Scan Key"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scan_key",
+          "status",
+          "tenant_id",
+          "submitted_at"
+        ],
+        "title": "ScanSubmissionResponse",
+        "description": "``202 Accepted``. An id and a status \u2014 never results.\n\nA submission response containing findings would imply the scan had\nfinished, which is the misconception \u00a726 asks the contract to avoid.\nPoll ``GET /api/v1/scans/{scan_key}`` for progress."
+      },
+      "ScoreCountsResource": {
+        "properties": {
+          "passed": {
+            "type": "integer",
+            "title": "Passed"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "indeterminate": {
+            "type": "integer",
+            "title": "Indeterminate"
+          },
+          "critical": {
+            "type": "integer",
+            "title": "Critical"
+          },
+          "high": {
+            "type": "integer",
+            "title": "High"
+          },
+          "medium": {
+            "type": "integer",
+            "title": "Medium"
+          },
+          "low": {
+            "type": "integer",
+            "title": "Low"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "passed",
+          "failed",
+          "indeterminate",
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "ScoreCountsResource"
+      },
+      "ScoreScope": {
+        "type": "string",
+        "enum": [
+          "tenant",
+          "framework",
+          "domain",
+          "scan"
+        ],
+        "title": "ScoreScope",
+        "description": "What a score is measuring.\n\nA closed vocabulary because each value implies a different\n``scope_value`` semantic, and an open-ended scope string would make\nthe stored rows impossible to interpret without guessing."
+      },
+      "Severity": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "Severity",
+        "description": "Static severity of a rule violation (\"how serious is this in the\nabstract\") \u2014 distinct from ``RiskScore`` (contextual) and\n``ConfidenceScore`` (data reliability). See blueprint \u00a713.\n\nVocabulary fixed to the four values confirmed by the Core\u2194AI Service\nintegration handoff (no ``INFO``) \u2014 Phase 1's original plan flagged\nthis as an open ambiguity (blueprint \u00a713 gives no enumeration) and\nused a 5-level placeholder; this replaces it with the authoritative\nexternal vocabulary now that it is known, rather than carrying two\ndivergent severity scales."
+      },
+      "SortOrder": {
+        "type": "string",
+        "enum": [
+          "detected_at_desc",
+          "detected_at_asc",
+          "severity_desc"
+        ],
+        "title": "SortOrder",
+        "description": "Allowed sort orders for findings.\n\nA closed enum rather than a free \"sort by\" string: arbitrary sort\nfields are both an injection surface and a performance trap (sorting\nby an unindexed column on a large tenant). Every value here is backed\nby an index.\n\nEach order ends with a unique tiebreaker (``id``). Without one,\nrows with equal ``detected_at`` can be returned in a different order\non each query, so a row can appear on two pages or none \u2014 the\nclassic unstable-pagination bug (\u00a719)."
+      },
+      "VersionResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "service",
+          "version",
+          "api_version"
+        ],
+        "title": "VersionResponse"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "RS256 JWT issued by complianceiq-core. Required claims: sub, tenant_id, roles, iss=complianceiq-core, aud=complianceiq, exp. Verify against /.well-known/jwks.json."
+      }
+    }
+  }
+}

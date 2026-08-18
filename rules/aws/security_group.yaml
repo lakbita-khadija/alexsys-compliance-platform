@@ -1,0 +1,234 @@
+# Security Group rules (Phase 3B senior catalog).
+#
+# Grounded in blueprint §15: "règles restrictives" (compliant) vs
+# "0.0.0.0/0 sur port sensible" (non-compliant). `unrestricted_ingress_ports`
+# and `has_unrestricted_ingress` are factual attributes computed by the
+# normalizer (infrastructure/cloud/aws/normalizers/security_group.py) —
+# this file is where "which ports are sensitive" is actually decided,
+# as a Rule concern rather than an Infrastructure one.
+#
+# The last rule below uses the ALLOWS relationship
+# (security-group -> security-group, wired by
+# infrastructure/cloud/aws/normalizers/security_group.py's
+# extract_allows_relationships) to demonstrate genuine cross-resource
+# evaluation: a security group whose own rules look fine can still be
+# exposed transitively if it grants access to a group that is itself
+# wide open.
+rules:
+  - id: security-group-ssh-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: critical
+    confidence: high
+    service: ec2
+    version: "1.1.0"
+    title: "Security group allows SSH (22) from the entire internet"
+    description: "An ingress rule permits TCP/22 from 0.0.0.0/0 or ::/0."
+    rationale: "SSH exposed to the internet is a top initial-access vector for opportunistic scanning and credential-stuffing/brute-force attacks."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 22
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 22 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, ssh]
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.2"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Restrict SSH ingress to known administrative CIDRs, or remove it in favor of Session Manager."
+      why_it_matters: "Any host on the internet can currently attempt to connect to SSH on instances protected by this group."
+      how_to_fix: "Replace the 0.0.0.0/0 source with a specific CIDR (VPN/bastion range), or use AWS Systems Manager Session Manager instead of exposing SSH at all."
+
+  - id: security-group-rdp-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: critical
+    confidence: high
+    service: ec2
+    version: "1.1.0"
+    title: "Security group allows RDP (3389) from the entire internet"
+    description: "An ingress rule permits TCP/3389 from 0.0.0.0/0 or ::/0."
+    rationale: "RDP exposed to the internet is a top ransomware initial-access vector."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 3389
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 3389 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, rdp]
+    framework_mappings:
+      - framework: cis_aws
+        control: "5.3"
+        status: unresolved
+        rationale: >-
+          Control numbering is consistent with CIS AWS Foundations
+          Benchmark v1.5.0 or later (networking moved to section 5).
+          That is an inference from the numbering, not a verification
+          against the published benchmark text, so this mapping stays
+          unresolved until a maintainer checks it and records provenance.
+    remediation:
+      summary: "Restrict RDP ingress to known administrative CIDRs, or remove it in favor of Session Manager/Fleet Manager."
+      why_it_matters: "Any host on the internet can currently attempt to connect to RDP on instances protected by this group."
+      how_to_fix: "Replace the 0.0.0.0/0 source with a specific CIDR, or use AWS Systems Manager Fleet Manager instead of exposing RDP at all."
+
+  - id: security-group-mysql-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: critical
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "Security group allows MySQL/Aurora (3306) from the entire internet"
+    description: "An ingress rule permits TCP/3306 from 0.0.0.0/0 or ::/0."
+    rationale: "A database port open to the internet exposes the data tier directly, bypassing any application-layer access control."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 3306
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 3306 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, database]
+    remediation:
+      summary: "Restrict database ingress to the application tier's security group only."
+      why_it_matters: "Any host on the internet can currently attempt to connect directly to a MySQL/Aurora endpoint protected by this group."
+      how_to_fix: "Replace the 0.0.0.0/0 source with a security-group reference to the application tier, never a public CIDR."
+
+  - id: security-group-postgres-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: critical
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "Security group allows PostgreSQL (5432) from the entire internet"
+    description: "An ingress rule permits TCP/5432 from 0.0.0.0/0 or ::/0."
+    rationale: "A database port open to the internet exposes the data tier directly, bypassing any application-layer access control."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 5432
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 5432 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, database]
+    remediation:
+      summary: "Restrict database ingress to the application tier's security group only."
+      why_it_matters: "Any host on the internet can currently attempt to connect directly to a PostgreSQL endpoint protected by this group."
+      how_to_fix: "Replace the 0.0.0.0/0 source with a security-group reference to the application tier, never a public CIDR."
+
+  - id: security-group-ftp-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "Security group allows FTP (21) from the entire internet"
+    description: "An ingress rule permits TCP/21 from 0.0.0.0/0 or ::/0."
+    rationale: "FTP transmits credentials and data in plaintext; internet exposure compounds an already-weak protocol."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 21
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 21 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, ftp]
+    remediation:
+      summary: "Remove public FTP ingress; migrate to SFTP/FTPS behind restricted access if file transfer is still required."
+      why_it_matters: "FTP credentials and data are sent in plaintext and are trivially interceptable, and this port is reachable from the entire internet."
+      how_to_fix: "Restrict the source CIDR, and prefer AWS Transfer Family (SFTP) over plain FTP."
+
+  - id: security-group-telnet-open-to-world
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: high
+    service: ec2
+    version: "1.0.0"
+    title: "Security group allows Telnet (23) from the entire internet"
+    description: "An ingress rule permits TCP/23 from 0.0.0.0/0 or ::/0."
+    rationale: "Telnet is unencrypted and effectively unused for legitimate modern administration — its presence usually indicates legacy equipment or a misconfiguration."
+    condition:
+      field: unrestricted_ingress_ports
+      operator: contains
+      value: 23
+    evidence_template: "Security group {resource_id} allows unrestricted ingress on port 23 (open ports: {unrestricted_ingress_ports})."
+    tags: [network, exposure, telnet]
+    remediation:
+      summary: "Remove Telnet ingress entirely; use SSH for remote administration."
+      why_it_matters: "Telnet sends all traffic, including credentials, unencrypted, and this port is reachable from the entire internet."
+      how_to_fix: "Remove the rule; if the device genuinely requires Telnet, restrict it to a management CIDR and plan a migration off it."
+
+  - id: security-group-unrestricted-ingress-any-port
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: medium
+    service: ec2
+    version: "1.0.0"
+    title: "Security group has at least one ingress rule open to the entire internet"
+    description: >
+      Composite catch-all: true whenever any ingress rule (single-port
+      or port-range/all-traffic) permits 0.0.0.0/0 or ::/0, regardless
+      of which specific port. Complements the named-port rules above,
+      which only fire for individually-enumerated single-port rules.
+    rationale: "A wide port range or 'all traffic' rule opened to the internet is at least as risky as any single sensitive port, but isn't caught by the single-port rules above (see normalizers/security_group.py's documented single-port-only limitation)."
+    condition:
+      field: has_unrestricted_ingress
+      operator: equals
+      value: true
+    evidence_template: "Security group {resource_id} has at least one ingress rule open to 0.0.0.0/0 or ::/0 ({ingress_rule_count} ingress rule(s) total)."
+    tags: [network, exposure, composite]
+    remediation:
+      summary: "Review every ingress rule on this group and restrict any 0.0.0.0/0 or ::/0 source."
+      why_it_matters: "At least one rule on this group accepts traffic from anywhere on the internet."
+      how_to_fix: "Replace broad public CIDRs with specific ranges or security-group references; see the port-specific findings on this same resource for named risky ports."
+
+  - id: security-group-allows-another-open-security-group
+    applies_to_resource_type: security_group
+    framework: iso_27001
+    control_id: A.8.20
+    domain: network
+    severity: high
+    confidence: medium
+    service: ec2
+    version: "1.0.0"
+    title: "Security group grants access to another security group that is itself open to the internet"
+    description: >
+      Cross-resource check using the ALLOWS graph relationship
+      (security-group -> security-group, from UserIdGroupPairs
+      references): true if this group references another security
+      group that itself has unrestricted ingress. This group's own
+      rules can look perfectly fine while still being transitively
+      exposed through the group it trusts.
+    rationale: "Security-group chaining is a common pattern (e.g. an app tier trusting a bastion's group); if the trusted group is itself wide open, the trust relationship inherits that exposure."
+    condition:
+      relationship: allows
+      direction: outgoing
+      target_type: security_group
+      where:
+        field: has_unrestricted_ingress
+        operator: equals
+        value: true
+    evidence_template: "Security group {resource_id} grants access to another security group that itself has unrestricted internet ingress."
+    tags: [network, exposure, relationship, composite]
+    remediation:
+      summary: "Fix the unrestricted ingress on the referenced (trusted) security group."
+      why_it_matters: "This group's own rules look fine, but a security group it trusts is itself open to the internet, transitively widening this group's real exposure."
+      how_to_fix: "Locate the referenced security group's own finding and restrict its unrestricted ingress rule."

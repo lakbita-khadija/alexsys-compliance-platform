@@ -1,0 +1,242 @@
+# IAM conformance scenarios (Phase 3B, Part L).
+#
+# Covers both IAM resource types: per-user (`iam_user`) and the
+# account-wide singleton (`iam_account_summary`).
+scenarios:
+  - scenario_id: iam-user-compliant
+    description: >
+      A user with MFA, one active access key, and no admin policy.
+      Every per-user rule PASSes.
+    resource:
+      resource_id: "arn:aws:iam::123456789012:user/conformance-good"
+      resource_type: iam_user
+      tenant_id: conformance-test
+      attributes:
+        mfa_active: true
+        access_key_count: 1
+        active_access_key_count: 1
+        attached_policy_names: ["ReadOnlyAccess"]
+        has_full_admin_policy: false
+    expected_findings:
+      - rule_id: iam-user-mfa-disabled
+        status: pass
+      - rule_id: iam-user-full-admin-policy-attached
+        status: pass
+      - rule_id: iam-user-multiple-active-access-keys
+        status: pass
+      - rule_id: iam-user-access-key-without-mfa
+        status: pass
+    tags: [iam, compliant]
+
+  - scenario_id: iam-user-no-mfa-with-access-key
+    description: >
+      The highest-risk credential shape the catalog detects: an active
+      access key on an identity with no MFA. Both the individual MFA
+      rule and the composite rule must fire.
+    resource:
+      resource_id: "arn:aws:iam::123456789012:user/conformance-no-mfa"
+      resource_type: iam_user
+      tenant_id: conformance-test
+      attributes:
+        mfa_active: false
+        access_key_count: 1
+        active_access_key_count: 1
+        attached_policy_names: []
+        has_full_admin_policy: false
+    expected_findings:
+      - rule_id: iam-user-mfa-disabled
+        status: fail
+        severity: high
+      - rule_id: iam-user-access-key-without-mfa
+        status: fail
+        severity: critical
+      - rule_id: iam-user-multiple-active-access-keys
+        status: pass
+    tags: [iam, mfa, non_compliant]
+
+  - scenario_id: iam-user-no-mfa-no-access-key
+    description: >
+      EDGE CASE separating the composite from its parts: no MFA, but
+      also no active access key. The MFA rule fires; the composite
+      must PASS, since there is no programmatic credential at risk.
+    resource:
+      resource_id: "arn:aws:iam::123456789012:user/conformance-console-only"
+      resource_type: iam_user
+      tenant_id: conformance-test
+      attributes:
+        mfa_active: false
+        access_key_count: 0
+        active_access_key_count: 0
+        attached_policy_names: []
+        has_full_admin_policy: false
+    expected_findings:
+      - rule_id: iam-user-mfa-disabled
+        status: fail
+      - rule_id: iam-user-access-key-without-mfa
+        status: pass
+    tags: [iam, edge_case]
+
+  - scenario_id: iam-user-full-admin
+    description: An admin-policy user with multiple active keys and no MFA.
+    resource:
+      resource_id: "arn:aws:iam::123456789012:user/conformance-admin"
+      resource_type: iam_user
+      tenant_id: conformance-test
+      attributes:
+        mfa_active: false
+        access_key_count: 2
+        active_access_key_count: 2
+        attached_policy_names: ["AdministratorAccess"]
+        has_full_admin_policy: true
+    expected_findings:
+      - rule_id: iam-user-full-admin-policy-attached
+        status: fail
+        severity: high
+      - rule_id: iam-user-multiple-active-access-keys
+        status: fail
+        severity: medium
+      - rule_id: iam-user-mfa-disabled
+        status: fail
+      - rule_id: iam-user-access-key-without-mfa
+        status: fail
+    tags: [iam, least_privilege, non_compliant]
+
+  - scenario_id: iam-user-two-keys-one-active
+    description: >
+      EDGE CASE at the boundary of `active_access_key_count > 1`: two
+      keys exist but only one is Active. The rule counts ACTIVE keys,
+      so it must PASS.
+    resource:
+      resource_id: "arn:aws:iam::123456789012:user/conformance-rotating"
+      resource_type: iam_user
+      tenant_id: conformance-test
+      attributes:
+        mfa_active: true
+        access_key_count: 2
+        active_access_key_count: 1
+        attached_policy_names: []
+        has_full_admin_policy: false
+    expected_findings:
+      - rule_id: iam-user-multiple-active-access-keys
+        status: pass
+    tags: [iam, edge_case]
+
+  - scenario_id: iam-account-compliant
+    description: >
+      An account with root MFA on and a strong password policy. Every
+      account-level rule PASSes.
+    resource:
+      resource_id: "iam-account-summary:123456789012"
+      resource_type: iam_account_summary
+      tenant_id: conformance-test
+      account_id: "123456789012"
+      attributes:
+        root_mfa_enabled: true
+        has_password_policy: true
+        password_policy_min_length: 14
+        password_policy_requires_symbols: true
+        password_policy_requires_numbers: true
+        password_policy_max_age_days: 90
+        password_policy_reuse_prevention: 24
+    expected_findings:
+      - rule_id: iam-root-account-mfa-disabled
+        status: pass
+      - rule_id: iam-account-password-policy-missing
+        status: pass
+      - rule_id: iam-account-password-policy-too-short
+        status: pass
+      - rule_id: iam-account-password-policy-no-symbols-required
+        status: pass
+      - rule_id: iam-account-password-policy-no-numbers-required
+        status: pass
+      - rule_id: iam-account-password-max-age-too-long
+        status: pass
+    tags: [iam, account, compliant]
+
+  - scenario_id: iam-account-no-password-policy
+    description: >
+      THREE-VALUED LOGIC: no password policy exists at all, so every
+      detail field is collected as null. The "missing policy" rule
+      fires; the detail rules must be INDETERMINATE or PASS — never
+      report a specific weak setting that was never configured.
+    resource:
+      resource_id: "iam-account-summary:123456789012"
+      resource_type: iam_account_summary
+      tenant_id: conformance-test
+      account_id: "123456789012"
+      attributes:
+        root_mfa_enabled: false
+        has_password_policy: false
+        password_policy_min_length: null
+        password_policy_requires_symbols: null
+        password_policy_requires_numbers: null
+        password_policy_max_age_days: null
+        password_policy_reuse_prevention: null
+    expected_findings:
+      - rule_id: iam-root-account-mfa-disabled
+        status: fail
+        severity: critical
+      - rule_id: iam-account-password-policy-missing
+        status: fail
+        severity: high
+      - rule_id: iam-account-password-policy-too-short
+        status: indeterminate
+      - rule_id: iam-account-password-policy-no-symbols-required
+        status: pass
+      - rule_id: iam-account-password-max-age-too-long
+        status: indeterminate
+    tags: [iam, account, three_valued_logic, non_compliant]
+
+  - scenario_id: iam-account-weak-password-policy
+    description: A configured but weak password policy.
+    resource:
+      resource_id: "iam-account-summary:123456789012"
+      resource_type: iam_account_summary
+      tenant_id: conformance-test
+      account_id: "123456789012"
+      attributes:
+        root_mfa_enabled: true
+        has_password_policy: true
+        password_policy_min_length: 8
+        password_policy_requires_symbols: false
+        password_policy_requires_numbers: false
+        password_policy_max_age_days: 365
+        password_policy_reuse_prevention: 1
+    expected_findings:
+      - rule_id: iam-account-password-policy-missing
+        status: pass
+      - rule_id: iam-account-password-policy-too-short
+        status: fail
+        severity: medium
+      - rule_id: iam-account-password-policy-no-symbols-required
+        status: fail
+        severity: low
+      - rule_id: iam-account-password-policy-no-numbers-required
+        status: fail
+      - rule_id: iam-account-password-max-age-too-long
+        status: fail
+    tags: [iam, account, non_compliant]
+
+  - scenario_id: iam-account-password-length-exactly-14
+    description: >
+      BOUNDARY CASE: minimum length exactly 14 (the CIS baseline). The
+      rule is `less_than 14`, so 14 itself must PASS.
+    resource:
+      resource_id: "iam-account-summary:123456789012"
+      resource_type: iam_account_summary
+      tenant_id: conformance-test
+      account_id: "123456789012"
+      attributes:
+        root_mfa_enabled: true
+        has_password_policy: true
+        password_policy_min_length: 14
+        password_policy_requires_symbols: true
+        password_policy_requires_numbers: true
+        password_policy_max_age_days: 90
+        password_policy_reuse_prevention: 24
+    expected_findings:
+      - rule_id: iam-account-password-policy-too-short
+        status: pass
+      - rule_id: iam-account-password-max-age-too-long
+        status: pass
+    tags: [iam, account, edge_case, boundary]
